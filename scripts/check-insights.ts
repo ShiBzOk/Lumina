@@ -2,14 +2,19 @@
 // result, and proves every reported loop against the raw edge list. Exits
 // non-zero if a loop names an edge that isn't there.
 //
-//   node scripts/check-insights.ts [fixtures/preview/result.json] [file to walk from]
+//   pnpm parse <repo-dir> --out result.json
+//   node scripts/check-insights.ts <result.json> [file to walk from]
 
 import path from "node:path";
 import { adjacency, walk } from "../lib/map/graph.ts";
 import { findInsights, LONG_FILE_LINES } from "../lib/map/insights.ts";
 import { readParseResult } from "../parser/io.ts";
 
-const file = path.resolve(process.argv[2] ?? path.join(import.meta.dirname, "../fixtures/preview/result.json"));
+if (!process.argv[2]) {
+  console.error("Usage: node scripts/check-insights.ts <result.json> [file to walk from]");
+  process.exit(2);
+}
+const file = path.resolve(process.argv[2]);
 const result = readParseResult(file);
 const insights = findInsights(result.files, result.edges, result.adapter);
 const edgeSet = new Set(result.edges.map((e) => `${e.from}\0${e.to}`));

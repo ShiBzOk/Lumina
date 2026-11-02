@@ -11,6 +11,7 @@ const required = [
   "NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+  "SUPABASE_SERVICE_ROLE_KEY",
 ] as const;
 
 type EnvKey = (typeof required)[number];
@@ -32,4 +33,6 @@ function get(key: EnvKey): string {
 export const env = {
   supabaseUrl: get("NEXT_PUBLIC_SUPABASE_URL"),
   supabasePublishableKey: get("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
+  // Server only: the pipeline writer. Not NEXT_PUBLIC_, so it never reaches a bundle.
+  supabaseSecretKey: get("SUPABASE_SERVICE_ROLE_KEY"),
 };

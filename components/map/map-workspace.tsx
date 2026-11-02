@@ -2,15 +2,16 @@
 
 import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { highlight, isFiltering, matches, sameSelection, type Filter, type Selection } from "@/lib/map/highlight";
 import { adjacency } from "@/lib/map/graph";
 import { findInsights } from "@/lib/map/insights";
 import { buildMap, fileTypeOf } from "@/lib/map/model";
 import { summarize } from "@/lib/map/summary";
-import type { Edge, ImportRecord, RepoFile } from "@/parser/types";
+import type { Coverage, Edge, ImportRecord, RepoFile } from "@/parser/types";
 import { Canvas, type CanvasHandle } from "./canvas";
 import { CategoryRail } from "./category-rail";
+import { CoverageBanner } from "./coverage-banner";
 import { DetailPane, type PaneTab } from "./detail-pane";
 import { Icon } from "./icons";
 import { FileSearch } from "./file-search";
@@ -21,11 +22,12 @@ interface MapWorkspaceProps {
   files: RepoFile[];
   edges: Edge[];
   imports: ImportRecord[];
+  coverage: Coverage;
 }
 
 // The shell: header across the top, categories on the left, the canvas in the
 // middle, details on the right. Later phases add to these panels, not move them.
-export function MapWorkspace({ meta, adapter, files, edges, imports }: MapWorkspaceProps) {
+export function MapWorkspace({ meta, adapter, files, edges, imports, coverage }: MapWorkspaceProps) {
   const map = useMemo(() => buildMap(files, edges), [files, edges]);
   const [selection, setSelection] = useState<Selection>(null);
   // What the pointer is over, on the map or in the pane; each lights it in the other.
@@ -97,11 +99,6 @@ export function MapWorkspace({ meta, adapter, files, edges, imports }: MapWorksp
         </Link>
         <span className="text-[19px] font-semibold tracking-[-0.03em]">Lumina</span>
         <span className="h-5 w-px bg-border" aria-hidden />
-        <span className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-xs">
-          <span className="flex size-4 items-center justify-center rounded bg-accent text-[9px] font-bold text-surface">P</span>
-          Preview
-          <span className="text-[10px] text-muted">no account</span>
-        </span>
         <span className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 font-mono text-[11px]">
           <Icon name="repo" className="size-3.5 text-accent" />
           {meta.repo}
@@ -125,8 +122,10 @@ export function MapWorkspace({ meta, adapter, files, edges, imports }: MapWorksp
         >
           <Icon name="sliders" className="size-4" />
         </button>
-        <AccountButton />
+        <UserButton />
       </header>
+
+      <CoverageBanner coverage={coverage} />
 
       <div className="flex min-h-0 flex-1">
         {railOpen && (
@@ -225,14 +224,4 @@ export function MapWorkspace({ meta, adapter, files, edges, imports }: MapWorksp
       </div>
     </div>
   );
-}
-
-const noSubscribe = () => () => {};
-
-// Clerk renders nothing on the server but mounts at once in a browser that
-// already has it cached, which the preview's static HTML can't match. So the
-// button only appears after hydration.
-function AccountButton() {
-  const hydrated = useSyncExternalStore(noSubscribe, () => true, () => false);
-  return hydrated ? <UserButton /> : null;
 }

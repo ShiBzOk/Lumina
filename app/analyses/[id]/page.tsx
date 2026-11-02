@@ -1,0 +1,64 @@
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { Suspense } from "react";
+import { AnalysisProgress } from "@/components/analysis/progress";
+import { MapWorkspace } from "@/components/map/map-workspace";
+import { WorkspaceHeader } from "@/components/workspace-header";
+import { getAnalysis, loadGraph } from "@/lib/analyses";
+
+export const metadata: Metadata = { title: "Analysis · Lumina" };
+
+// One address for an analysis from start to finish: its progress while it
+// runs, its map once stored. A finished run refreshes this page into the map.
+async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["params"] }) {
+  const { id } = await params;
+  const analysis = await getAnalysis(id);
+  if (!analysis || !analysis.project) notFound();
+  const repo = `${analysis.project.repo_owner}/${analysis.project.repo_name}`;
+
+  if (analysis.status === "complete") {
+    if (!analysis.branch || !analysis.commit_sha || !analysis.adapter) {
+      throw new Error(`Analysis ${analysis.id} is complete but has no branch, commit or adapter recorded`);
+    }
+    const { files, edges, imports, coverage } = await loadGraph(analysis);
+    // Only what the browser needs crosses over; everything the panes show is derived from these.
+    return (
+      <MapWorkspace
+        meta={{ repo, branch: analysis.branch, commit: analysis.commit_sha }}
+        adapter={analysis.adapter}
+        files={files}
+        edges={edges}
+        imports={imports}
+        coverage={coverage}
+      />
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen flex-col">
+      <WorkspaceHeader />
+      <main className="flex flex-1 flex-col">
+        <AnalysisProgress
+          id={analysis.id}
+          repo={repo}
+          branch={analysis.branch}
+          commit={analysis.commit_sha}
+          initial={{
+            status: analysis.status,
+            stage: analysis.stage,
+            message: analysis.status === "failed" ? analysis.error : analysis.stage_message,
+          }}
+          stale={analysis.stale}
+        />
+      </main>
+    </div>
+  );
+}
+
+export default function AnalysisPage({ params }: PageProps<"/analyses/[id]">) {
+  return (
+    <Suspense fallback={<div className="flex flex-1 items-center justify-center text-xs text-muted">Loading analysis…</div>}>
+      <Analysis params={params} />
+    </Suspense>
+  );
+}

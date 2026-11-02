@@ -40,6 +40,11 @@ export function readParseResult(file: string): ParseResult {
   };
 }
 
+/** The coverage report alone, checked the same way, for wherever it is stored apart from the result. */
+export function readCoverage(value: unknown): Coverage {
+  return coverage(value, "coverage");
+}
+
 function repoFile(v: unknown, at: string): RepoFile {
   const o = obj(v, at);
   return {

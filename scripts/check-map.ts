@@ -1,14 +1,19 @@
 // Counts the numbers the phase 4 acceptance check asks for, from the same pure
 // functions the canvas uses. Exits non-zero if any of them fails.
 //
-//   node scripts/check-map.ts [fixtures/preview/result.json]
+//   pnpm parse <repo-dir> --out result.json
+//   node scripts/check-map.ts <result.json>
 
 import path from "node:path";
 import { MAX_NODES } from "../lib/map/fold.ts";
 import { buildMap } from "../lib/map/model.ts";
 import { readParseResult } from "../parser/io.ts";
 
-const file = path.resolve(process.argv[2] ?? path.join(import.meta.dirname, "../fixtures/preview/result.json"));
+if (!process.argv[2]) {
+  console.error("Usage: node scripts/check-map.ts <result.json>");
+  process.exit(2);
+}
+const file = path.resolve(process.argv[2]);
 const result = readParseResult(file);
 const map = buildMap(result.files, result.edges);
 

@@ -9,8 +9,7 @@
     "lint": "eslint",
     "parse": "node parser/cli.ts",
     "check:map": "node scripts/check-map.ts",
-    "check:insights": "node scripts/check-insights.ts",
-    "preview:fixture": "node scripts/preview-fixture.ts"
+    "check:insights": "node scripts/check-insights.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.23",
@@ -18,6 +17,7 @@
     "next": "16.4.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "tar": "^7.5.22",
     "ts-morph": "^28.0.0"
   },
   "devDependencies": {

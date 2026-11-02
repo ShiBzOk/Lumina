@@ -235,8 +235,12 @@ export function createResolver(
       };
     }
 
+    // An alias whose every target is inside node_modules is pinning a package,
+    // not pointing at repository code, so an uninstalled clone falls through
+    // to the package checks below instead of reading as a missing file.
     const alias = aliasCandidates(specifier, config);
-    if (alias) {
+    const pinsPackage = alias?.paths.every((p) => p.split("/").includes("node_modules")) ?? false;
+    if (alias && !pinsPackage) {
       return {
         status: "unresolved",
         reason: "alias-target-missing",
