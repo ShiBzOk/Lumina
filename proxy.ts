@@ -1,7 +1,8 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-const isPublic = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)"]);
+// The preview renders a checked-in fixture and exists to be opened without an account.
+const isPublic = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)", "/preview(.*)"]);
 const isOnboarding = createRouteMatcher(["/onboarding"]);
 
 // Decided here, before any page renders, so a signed-out request never

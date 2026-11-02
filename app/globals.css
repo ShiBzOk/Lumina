@@ -11,6 +11,10 @@
   --accent: #0a6cf0;
   --danger: #c2261c;
   --success: #12924f;
+  /* Direction on the map: what flows into a file, what flows out of it. */
+  --incoming: #12924f;
+  --outgoing: #c96a04;
+  --edge: #c3c9d3;
 }
 
 @theme inline {
@@ -22,6 +26,9 @@
   --color-accent: var(--accent);
   --color-danger: var(--danger);
   --color-success: var(--success);
+  --color-incoming: var(--incoming);
+  --color-outgoing: var(--outgoing);
+  --color-edge: var(--edge);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
