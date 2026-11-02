@@ -20,6 +20,7 @@ export type Database = {
       analyses: {
         Row: {
           adapter: string | null
+          attempt: number
           branch: string | null
           commit_sha: string | null
           coverage: Json | null
@@ -38,6 +39,7 @@ export type Database = {
         }
         Insert: {
           adapter?: string | null
+          attempt?: number
           branch?: string | null
           commit_sha?: string | null
           coverage?: Json | null
@@ -56,6 +58,7 @@ export type Database = {
         }
         Update: {
           adapter?: string | null
+          attempt?: number
           branch?: string | null
           commit_sha?: string | null
           coverage?: Json | null
@@ -232,6 +235,7 @@ export type Database = {
       files: {
         Row: {
           analysis_id: string
+          attempt: number
           bytes: number
           content_hash: string
           fan_in: number
@@ -246,6 +250,7 @@ export type Database = {
         }
         Insert: {
           analysis_id: string
+          attempt: number
           bytes: number
           content_hash: string
           fan_in: number
@@ -260,6 +265,7 @@ export type Database = {
         }
         Update: {
           analysis_id?: string
+          attempt?: number
           bytes?: number
           content_hash?: string
           fan_in?: number

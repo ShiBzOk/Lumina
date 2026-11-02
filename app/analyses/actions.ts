@@ -73,7 +73,7 @@ export async function submitRepository(_prev: SubmitState, form: FormData): Prom
     redirect(`/analyses/${existing.data.id}`);
   }
 
-  const request = { analysisId: inserted.data.id, projectId: projectRow.id, orgId, repo, branch: branchInput || null };
+  const request = { analysisId: inserted.data.id, projectId: projectRow.id, orgId, repo, branch: branchInput || null, attempt: 0 };
   after(() => runAnalysis(request));
   redirect(`/analyses/${inserted.data.id}`);
 }
@@ -89,11 +89,35 @@ export async function rerunAnalysis(analysisId: string): Promise<void> {
   const analysis = await getAnalysis(analysisId);
   if (!analysis || !analysis.project) throw new Error("No such analysis");
 
-  const cutoff = new Date(Date.now() - STALE_AFTER_MS).toISOString();
-  const { data, error } = await createWriterSupabase()
+  // Claiming the next attempt is what fences off the previous run, which may
+  // still be alive. Matching the attempt read here makes the claim a
+  // compare-and-swap, so two re-runs racing still start one run.
+  const db = createWriterSupabase();
+  const current = await db.from("analyses").select("attempt").eq("id", analysis.id).single();
+  if (current.error) throw new Error(`Could not read the analysis: ${current.error.message}`);
+  const attempt = current.data.attempt + 1;
+
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - STALE_AFTER_MS).toISOString();
+  const { data, error } = await db
     .from("analyses")
-    .update({ status: "queued", stage: null, stage_message: null, error: null, finished_at: null, coverage: null, adapter: null, file_count: null, package_count: null })
+    .update({
+      status: "queued",
+      stage: null,
+      stage_message: null,
+      error: null,
+      finished_at: null,
+      coverage: null,
+      adapter: null,
+      file_count: null,
+      package_count: null,
+      attempt,
+      // Set outright: a stale queued row re-queued changes no status, stage or
+      // message, so the trigger alone would leave it looking stale.
+      stage_changed_at: now.toISOString(),
+    })
     .eq("id", analysis.id)
+    .eq("attempt", current.data.attempt)
     .or(`status.in.(complete,failed),stage_changed_at.lt.${cutoff}`)
     .select("id");
   if (error) throw new Error(`Could not restart the analysis: ${error.message}`);
@@ -107,6 +131,7 @@ export async function rerunAnalysis(analysisId: string): Promise<void> {
         orgId,
         repo: { owner: repo_owner, name: repo_name },
         branch: analysis.branch,
+        attempt,
       }),
     );
   }

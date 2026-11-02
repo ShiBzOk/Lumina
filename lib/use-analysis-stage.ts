@@ -8,6 +8,21 @@ import { useBrowserSupabase } from "@/lib/supabase-browser";
 
 const key = (e: StageEvent) => `${e.status}|${e.stage}|${e.message}`;
 
+// One server refresh re-renders every row on the page, and a dashboard's rows
+// tend to join their channels in the same moment. Requests inside a short
+// window share one refresh that starts after the last of them, so a coalesced
+// request still sees state at least as new as when it asked.
+const REFRESH_WINDOW_MS = 150;
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function refreshSoon(router: ReturnType<typeof useRouter>): void {
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    router.refresh();
+  }, REFRESH_WINDOW_MS);
+}
+
 /**
  * The stage of one analysis, as the database publishes it. Subscribes to the
  * private analysis:<id> channel only while the run is unfinished; nothing here
@@ -51,12 +66,12 @@ export function useAnalysisStage(id: string, initial: StageEvent): { event: Stag
           const event = readStageEvent(payload);
           if (!event) return;
           setLive(event);
-          if (event.status === "complete" || event.status === "failed") router.refresh();
+          if (event.status === "complete" || event.status === "failed") refreshSoon(router);
         })
         .subscribe((status, err) => {
           if (status === "SUBSCRIBED") {
             setUnavailable(false);
-            router.refresh();
+            refreshSoon(router);
           }
           // Refused by the policy, or the socket failed: the page says so
           // rather than sitting there looking idle.

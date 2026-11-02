@@ -12,6 +12,11 @@ const HEADERS = { "User-Agent": "lumina", Accept: "application/vnd.github+json",
 // Past this the run would spend minutes downloading something it can't parse
 // in a request anyway. Stated as a limit rather than worked around.
 const MAX_ARCHIVE_BYTES = 500 * 1024 * 1024;
+// The compressed limit says nothing about what comes out: an archive that is
+// mostly repetition expands without bound. So extraction has its own budget,
+// counted from each entry's header before a byte of it is written.
+const MAX_EXTRACTED_BYTES = 4 * 1024 * 1024 * 1024;
+const MAX_ENTRIES = 500_000;
 
 export interface RepoRef {
   owner: string;
@@ -101,13 +106,21 @@ export interface Selection {
  */
 export async function selectFiles(archive: string, dir: string): Promise<Selection> {
   const selection: Selection = { files: 0, extensions: new Map(), links: [] };
-  await tar.x({
-    file: archive,
+  let entries = 0;
+  let extracted = 0;
+  const extractor = tar.x({
     cwd: dir,
     // GitHub wraps everything in one owner-name-sha directory.
     strip: 1,
     filter: (entryPath, entry) => {
       if (!("type" in entry)) return false;
+      entries += 1;
+      if (entry.type !== "SymbolicLink" && entry.type !== "Link") extracted += entry.size;
+      if (entries > MAX_ENTRIES || extracted > MAX_EXTRACTED_BYTES) {
+        const over = entries > MAX_ENTRIES ? `more than ${MAX_ENTRIES} entries` : `more than ${mb(MAX_EXTRACTED_BYTES)} once extracted`;
+        extractor.abort(new Error(`The archive holds ${over}; that is the limit`));
+        return false;
+      }
       // The filter sees the path before the wrapper directory is stripped.
       const rel = entryPath.split("/").slice(1).join("/").replace(/\/$/, "");
       switch (entry.type) {
@@ -130,6 +143,7 @@ export async function selectFiles(archive: string, dir: string): Promise<Selecti
       }
     },
   });
+  await pipeline(fs.createReadStream(archive), extractor);
   selection.links.sort();
   return selection;
 }

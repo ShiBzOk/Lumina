@@ -14,6 +14,8 @@ const CHUNK = 1000;
 export interface StoreTarget {
   analysisId: string;
   orgId: string;
+  /** Stamped on every file, so the database can refuse a superseded run's rows. */
+  attempt: number;
 }
 
 export async function storeResult(
@@ -22,7 +24,7 @@ export async function storeResult(
   result: ParseResult,
   progress: (message: string) => Promise<void>,
 ): Promise<void> {
-  const { analysisId, orgId } = target;
+  const { analysisId, orgId, attempt } = target;
   const base = { org_id: orgId, analysis_id: analysisId };
 
   const idOf = new Map<string, string>();
@@ -32,6 +34,7 @@ export async function storeResult(
       .insert(
         chunk.map((f) => ({
           ...base,
+          attempt,
           path: f.path,
           folder: f.folder,
           package: f.package,

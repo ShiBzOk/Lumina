@@ -18,7 +18,17 @@ export interface RunRequest {
   repo: RepoRef;
   /** Null for the repository's default branch. */
   branch: string | null;
+  /** The attempt this run claimed. Every write is checked against it. */
+  attempt: number;
 }
+
+// The parser reports nothing while it works, so its deadline sits below the
+// ten minutes after which a silent run counts as stale and may be re-run.
+const PARSE_DEADLINE_MS = 8 * 60 * 1000;
+
+// Thrown when a re-run has claimed this analysis. The run stops and writes
+// nothing more, not even a failure: the row belongs to its successor.
+class Superseded extends Error {}
 
 // fetch → select → parse → store. Each stage is written before it starts, and
 // the database publishes it. Whatever goes wrong, the catch at the bottom
@@ -27,14 +37,15 @@ export interface RunRequest {
 // check is what covers that.
 export async function runAnalysis(request: RunRequest): Promise<void> {
   const db = createWriterSupabase();
-  const { analysisId, orgId, repo } = request;
+  const { analysisId, orgId, repo, attempt } = request;
   const slug = `${repo.owner}/${repo.name}`;
   let stage: AnalysisStage = "fetching";
   const work = await fs.mkdtemp(path.join(os.tmpdir(), "lumina-"));
 
   const update = async (values: TablesUpdate<"analyses">) => {
-    const { error } = await db.from("analyses").update(values).eq("id", analysisId);
+    const { data, error } = await db.from("analyses").update(values).eq("id", analysisId).eq("attempt", attempt).select("id");
     if (error) throw new Error(`Could not update the analysis: ${error.message}`);
+    if (data.length === 0) throw new Superseded();
   };
   const enter = (next: AnalysisStage, message: string) => {
     stage = next;
@@ -45,7 +56,12 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
     await enter("fetching", `Looking up ${slug} on GitHub`);
     // A re-run starts from nothing: rows from the previous run would otherwise
     // sit beside the new ones. Edges, imports and roles go with their files.
-    for (const table of ["files", "insights", "routes"] as const) {
+    // Only earlier attempts' files, so a run that lost its claim can't clear its successor's.
+    {
+      const { error } = await db.from("files").delete().eq("analysis_id", analysisId).lt("attempt", attempt);
+      if (error) throw new Error(`Could not clear the previous run's files: ${error.message}`);
+    }
+    for (const table of ["insights", "routes"] as const) {
       const { error } = await db.from(table).delete().eq("analysis_id", analysisId);
       if (error) throw new Error(`Could not clear the previous run's ${table}: ${error.message}`);
     }
@@ -86,7 +102,7 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
       "storing",
       `Storing ${formatCount(result.files.length)} files, ${formatCount(result.edges.length)} edges, ${formatCount(result.imports.length)} imports`,
     );
-    await storeResult(db, { analysisId, orgId }, result, (message) => update({ stage_message: message }));
+    await storeResult(db, { analysisId, orgId, attempt }, result, (message) => update({ stage_message: message }));
 
     await update({
       status: "complete",
@@ -99,13 +115,16 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
       package_count: new Set(result.files.flatMap((f) => f.package ?? [])).size,
     });
   } catch (error) {
+    if (error instanceof Superseded) return;
     const reason = error instanceof Error ? error.message : String(error);
     // Half-stored rows go first, so a failed analysis never shows a partial graph.
-    const { error: clearError } = await db.from("files").delete().eq("analysis_id", analysisId);
+    // Only this attempt's, and the failure is recorded only if the row is still ours.
+    const { error: clearError } = await db.from("files").delete().eq("analysis_id", analysisId).eq("attempt", attempt);
     const { error: failError } = await db
       .from("analyses")
       .update({ status: "failed", stage, error: reason, finished_at: new Date().toISOString() })
-      .eq("id", analysisId);
+      .eq("id", analysisId)
+      .eq("attempt", attempt);
     if (clearError || failError) {
       console.error(`Analysis ${analysisId} failed in ${stage} (${reason}) and the failure could not be recorded:`, clearError ?? failError);
     }
@@ -129,16 +148,28 @@ function noSourceFiles(extensions: Map<string, number>): string {
 // output comes back through the contract reader like any other result.
 async function parse(dir: string, out: string): Promise<ParseResult> {
   const cli = path.join(process.cwd(), "parser", "cli.ts");
+  let timedOut = false;
   const { code, stderr } = await new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
     const child = spawn(process.execPath, [cli, dir, "--out", out], { stdio: ["ignore", "ignore", "pipe"] });
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, PARSE_DEADLINE_MS);
     let stderr = "";
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
       stderr = (stderr + chunk).slice(-4000);
     });
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code, stderr }));
+    child.on("error", (error) => {
+      clearTimeout(deadline);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(deadline);
+      resolve({ code, stderr });
+    });
   });
+  if (timedOut) throw new Error(`The parser was stopped after ${PARSE_DEADLINE_MS / 60000} minutes without finishing`);
   // Exit 1 means the result broke its own invariants (files that don't add up,
   // edges pointing at nothing). That is a failed run, not a graph to show.
   if (code === 1) throw new Error("The parser's result broke its own invariants, so it was not stored");
