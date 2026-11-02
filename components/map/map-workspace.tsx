@@ -2,9 +2,10 @@
 
 import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
-import { useCallback, useMemo, useRef, useState } from "react";
-import { highlight, isFiltering, matches, type Filter, type Selection } from "@/lib/map/highlight";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { highlight, isFiltering, matches, sameSelection, type Filter, type Selection } from "@/lib/map/highlight";
 import { buildMap, fileTypeOf } from "@/lib/map/model";
+import { summarize } from "@/lib/map/summary";
 import type { Edge, ImportRecord, RepoFile } from "@/parser/types";
 import { Canvas, type CanvasHandle } from "./canvas";
 import { CategoryRail } from "./category-rail";
@@ -14,6 +15,7 @@ import { FileSearch } from "./file-search";
 
 interface MapWorkspaceProps {
   meta: { repo: string; branch: string; commit: string };
+  adapter: string;
   files: RepoFile[];
   edges: Edge[];
   imports: ImportRecord[];
@@ -21,16 +23,19 @@ interface MapWorkspaceProps {
 
 // The shell: header across the top, categories on the left, the canvas in the
 // middle, details on the right. Later phases add to these panels, not move them.
-export function MapWorkspace({ meta, files, edges, imports }: MapWorkspaceProps) {
+export function MapWorkspace({ meta, adapter, files, edges, imports }: MapWorkspaceProps) {
   const map = useMemo(() => buildMap(files, edges), [files, edges]);
   const [selection, setSelection] = useState<Selection>(null);
+  // What the pointer is over, on the map or in the pane; each lights it in the other.
+  const [hovered, setHovered] = useState<Selection>(null);
   const [filter, setFilter] = useState<Filter>({ area: null, hiddenTypes: new Set() });
   const [railOpen, setRailOpen] = useState(true);
   const [paneOpen, setPaneOpen] = useState(true);
-  const [tab, setTab] = useState<PaneTab>("overview");
+  const [tab, setTab] = useState<PaneTab>("structure");
   const canvas = useRef<CanvasHandle>(null);
 
   const lit = useMemo(() => highlight(map, selection), [map, selection]);
+  const summary = useMemo(() => summarize(files, imports), [files, imports]);
   const byPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
   const { importsOf, targetsOf, importersOf } = useMemo(() => {
     const importsOf = Map.groupBy(
@@ -62,8 +67,11 @@ export function MapWorkspace({ meta, files, edges, imports }: MapWorkspaceProps)
   // only ever happens because that click asked for it.
   const select = useCallback((next: Selection) => {
     setSelection(next);
+    // The row under the pointer may be gone after the pane redraws, and never say so.
+    setHovered(null);
     if (next) setPaneOpen(true);
   }, []);
+  const hover = useCallback((next: Selection) => setHovered((prev) => (sameSelection(prev, next) ? prev : next)), []);
   const selectAndReveal = useCallback(
     (next: Selection) => {
       select(next);
@@ -113,7 +121,7 @@ export function MapWorkspace({ meta, files, edges, imports }: MapWorkspaceProps)
         >
           <Icon name="sliders" className="size-4" />
         </button>
-        <UserButton />
+        <AccountButton />
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -133,8 +141,10 @@ export function MapWorkspace({ meta, files, edges, imports }: MapWorkspaceProps)
           map={map}
           selection={selection}
           highlight={lit}
+          hovered={hovered}
           filter={filter}
           onSelect={select}
+          onHover={hover}
           banner={
             <div className="flex items-center gap-2 rounded-full bg-surface/95 px-3.5 py-1.5 text-[11px] whitespace-nowrap text-muted shadow-[0_1px_6px_rgba(16,24,40,0.06)] ring-1 ring-border">
               {filtering ? (
@@ -189,7 +199,11 @@ export function MapWorkspace({ meta, files, edges, imports }: MapWorkspaceProps)
         {paneOpen && (
           <DetailPane
             map={map}
+            repo={meta.repo}
+            adapter={adapter}
+            summary={summary}
             selection={selection}
+            hovered={hovered}
             files={byPath}
             importsOf={importsOf}
             targetsOf={targetsOf}
@@ -197,10 +211,21 @@ export function MapWorkspace({ meta, files, edges, imports }: MapWorkspaceProps)
             tab={tab}
             onTab={setTab}
             onSelect={selectAndReveal}
+            onHover={hover}
             onCollapse={() => setPaneOpen(false)}
           />
         )}
       </div>
     </div>
   );
+}
+
+const noSubscribe = () => () => {};
+
+// Clerk renders nothing on the server but mounts at once in a browser that
+// already has it cached, which the preview's static HTML can't match. So the
+// button only appears after hydration.
+function AccountButton() {
+  const hydrated = useSyncExternalStore(noSubscribe, () => true, () => false);
+  return hydrated ? <UserButton /> : null;
 }

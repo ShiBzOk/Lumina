@@ -23,6 +23,12 @@ export interface Viewport {
   k: number;
 }
 
+/** Which side handles of a row a connection meets, coloured as the canvas colours it. */
+export interface Sides {
+  left?: "in" | "out";
+  right?: "in" | "out";
+}
+
 export interface CanvasHandle {
   /** Bring a node, and optionally one of its files, into view. Only ever called from a click. */
   reveal: (id: string, path?: string) => void;
@@ -65,8 +71,11 @@ interface CanvasProps {
   map: RepoMap;
   selection: Selection;
   highlight: Highlight | null;
+  /** Lit wherever it is on the map, whether the pointer is over it here or in the pane. */
+  hovered: Selection;
   filter: Filter;
   onSelect: (selection: Selection) => void;
+  onHover: (target: Selection) => void;
   /** Floats at the top centre of the canvas. */
   banner: ReactNode;
   /** Extra floating controls, positioned by the caller. */
@@ -74,7 +83,7 @@ interface CanvasProps {
   ref?: Ref<CanvasHandle>;
 }
 
-export function Canvas({ map, selection, highlight, filter, onSelect, banner, children, ref }: CanvasProps) {
+export function Canvas({ map, selection, highlight, hovered, filter, onSelect, onHover, banner, children, ref }: CanvasProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [positions, setPositions] = useState(() => new Map(map.positions));
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, k: 1 });
@@ -245,6 +254,15 @@ export function Canvas({ map, selection, highlight, filter, onSelect, banner, ch
     else if (mode === "select" && !(e.target instanceof Element && e.target.closest("[data-card]"))) onSelect(null);
   };
 
+  // A row is the file; anywhere else on a card is its folder. Nothing reports
+  // while a gesture is underway, so a pan doesn't sweep highlights across the pane.
+  const onPointerOver = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (gesture.current || !(e.target instanceof Element) || e.target.closest("[data-overlay]")) return;
+    const row = e.target.closest<HTMLElement>("[data-row]")?.dataset.row;
+    const id = e.target.closest<HTMLElement>("[data-card]")?.dataset.card;
+    onHover(row !== undefined ? { kind: "file", path: row } : id !== undefined ? { kind: "node", id } : null);
+  };
+
   const onSelectFile = useCallback((path: string) => onSelect({ kind: "file", path }), [onSelect]);
 
   // Where a file sits in its card's window, or null when it isn't shown.
@@ -259,6 +277,9 @@ export function Canvas({ map, selection, highlight, filter, onSelect, banner, ch
   const edgePaths = useMemo(() => {
     const quiet: ReactNode[] = [];
     const lit: ReactNode[] = [];
+    // The hovered file's own connections, drawn last so nothing crosses them.
+    const top: ReactNode[] = [];
+    const hoveredPath = hovered?.kind === "file" ? hovered.path : null;
     map.edges.forEach((e, i) => {
       const a = positions.get(e.fromNode);
       const b = positions.get(e.toNode);
@@ -268,7 +289,8 @@ export function Canvas({ map, selection, highlight, filter, onSelect, banner, ch
       const toSlot = rowSlot(e.toNode, e.to);
       // Only files on screen are connected. A lit edge is the exception: a
       // selection never loses a connection, so its hidden end meets the header.
-      if ((fromSlot === null || toSlot === null) && !direction) return;
+      const hot = hoveredPath !== null && (e.from === hoveredPath || e.to === hoveredPath);
+      if ((fromSlot === null || toSlot === null) && !direction && !hot) return;
       const rowY = (slot: number | null) => (slot === null ? HEADER_HEIGHT / 2 : HEADER_HEIGHT + LIST_PADDING + slot * ROW_HEIGHT + ROW_HEIGHT / 2);
       const x1 = a.x + CARD_WIDTH;
       const y1 = a.y + rowY(fromSlot);
@@ -280,8 +302,14 @@ export function Canvas({ map, selection, highlight, filter, onSelect, banner, ch
       const dx = same ? 36 + Math.abs(y2 - y1) * 0.25 : Math.max(60, Math.abs(x2 - x1) * 0.5);
       const d = `M${x1},${y1} C${x1 + dx},${y1} ${same ? x2 + dx : x2 - dx},${y2} ${x2},${y2}`;
 
+      if (hot) {
+        // Coloured as a click would colour it, relative to the hovered file.
+        const towards = e.from === hoveredPath ? "out" : "in";
+        top.push(<path key={i} d={d} stroke={DIRECTION_COLOR[towards]} strokeWidth={3} fill="none" />);
+        return;
+      }
       if (direction) {
-        lit.push(<path key={i} d={d} stroke={DIRECTION_COLOR[direction]} strokeWidth={1.75} fill="none" />);
+        lit.push(<path key={i} d={d} stroke={DIRECTION_COLOR[direction]} strokeWidth={2.5} fill="none" />);
         return;
       }
       const from = rowsByPath.get(e.from);
@@ -290,18 +318,31 @@ export function Canvas({ map, selection, highlight, filter, onSelect, banner, ch
       const opacity = highlight ? 0.18 : filteredOut ? 0.2 : 0.9;
       quiet.push(<path key={i} d={d} stroke="var(--edge)" strokeWidth={1} strokeOpacity={opacity} fill="none" />);
     });
-    return [...quiet, ...lit];
-  }, [map.edges, positions, rowSlot, highlight, filtering, filter, rowsByPath]);
+    return [...quiet, ...lit, ...top];
+  }, [map.edges, positions, rowSlot, highlight, hovered, filtering, filter, rowsByPath]);
+
+  // Which handles the hovered file's connections meet, per card and row. A
+  // connection leaves its importer on the right and enters its target on the
+  // left, or on the right when both ends share a folder.
+  const traced = useMemo(() => {
+    const byNode = new Map<string, Map<string, Sides>>();
+    if (hovered?.kind !== "file") return byNode;
+    const mark = (node: string, path: string, side: keyof Sides, towards: "in" | "out") => {
+      const rows = byNode.get(node) ?? new Map<string, Sides>();
+      byNode.set(node, rows.set(path, { ...rows.get(path), [side]: towards }));
+    };
+    for (const e of map.edges) {
+      if (e.from !== hovered.path && e.to !== hovered.path) continue;
+      const towards = e.from === hovered.path ? "out" : "in";
+      mark(e.fromNode, e.from, "right", towards);
+      mark(e.toNode, e.to, e.fromNode === e.toNode ? "right" : "left", towards);
+    }
+    return byNode;
+  }, [hovered, map.edges]);
 
   const bounds = useMemo(() => boundsOf(map.nodes, positions), [map.nodes, positions]);
 
   const zoomBy = (factor: number) => zoomAt(size.w / 2, size.h / 2, factor);
-
-  // The grid moves with the map but keeps one density on screen: its world
-  // spacing doubles or halves so the dots always sit 18–36px apart.
-  let gridSpacing = 24 * viewport.k;
-  while (gridSpacing < 18) gridSpacing *= 2;
-  while (gridSpacing > 36) gridSpacing /= 2;
 
   return (
     <div
@@ -310,15 +351,17 @@ export function Canvas({ map, selection, highlight, filter, onSelect, banner, ch
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onPointerOver={onPointerOver}
+      onPointerLeave={() => onHover(null)}
       className={`relative min-w-0 flex-1 touch-none overflow-hidden bg-background select-none ${
         mode === "hand" ? "cursor-grab active:cursor-grabbing" : ""
       }`}
       style={
         grid
           ? {
-              backgroundImage: "radial-gradient(circle, #cfd5de 1px, transparent 1.4px)",
-              backgroundSize: `${gridSpacing}px ${gridSpacing}px`,
-              backgroundPosition: `${viewport.x}px ${viewport.y}px`,
+              backgroundImage: "radial-gradient(circle, rgba(148, 158, 175, 0.2) 1px, transparent 1.4px)",
+              // Fixed to the screen, not the map: the same size at every zoom.
+              backgroundSize: "24px 24px",
             }
           : undefined
       }
@@ -337,6 +380,11 @@ export function Canvas({ map, selection, highlight, filter, onSelect, banner, ch
             position={positions.get(n.id) ?? { x: 0, y: 0 }}
             selection={selection}
             highlight={highlight}
+            // Only the card holding what is hovered gets a value, so a hover redraws one card.
+            hovered={
+              hovered?.kind === "node" ? (hovered.id === n.id ? hovered : null) : hovered && map.nodeOf.get(hovered.path) === n.id ? hovered : null
+            }
+            traced={traced.get(n.id) ?? null}
             filter={filter}
             filtering={filtering}
             selectable={mode === "select"}

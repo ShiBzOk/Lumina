@@ -28,15 +28,3 @@ export function readPreviewMeta(): PreviewMeta {
   };
   return { repo: field("repo"), branch: field("branch"), commit: field("commit") };
 }
-
-let sources: Map<string, string> | undefined;
-
-/** The text of one file in the fixture, or null if it has none (binary assets, unknown paths). */
-export function readPreviewSource(file: string): string | null {
-  if (!sources) {
-    const raw: unknown = JSON.parse(fs.readFileSync(path.join(DIR, "sources.json"), "utf8"));
-    if (typeof raw !== "object" || raw === null) throw new Error("fixtures/preview/sources.json is not an object");
-    sources = new Map(Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === "string"));
-  }
-  return sources.get(file) ?? null;
-}

@@ -1,17 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { Selection } from "@/lib/map/highlight";
-import type { FileRow, MapNode, RepoMap } from "@/lib/map/model";
+import { useMemo, useState, type ReactNode } from "react";
+import { sameSelection, type Selection } from "@/lib/map/highlight";
+import { fileTypeOf, type MapNode, type RepoMap } from "@/lib/map/model";
+import { countTypes, type RepoSummary } from "@/lib/map/summary";
 import type { ImportRecord, RepoFile } from "@/parser/types";
 import { TYPE_COLOR } from "./colors";
 import { Icon, type IconName } from "./icons";
 
-export type PaneTab = "overview" | "code";
+export type PaneTab = "structure" | "explanation";
+
+/** How many rows a summary list shows before it is asked for the rest. */
+const LIST_LIMIT = 8;
 
 interface DetailPaneProps {
   map: RepoMap;
+  repo: string;
+  /** The framework adapter the parser chose; "none" is the fallback. */
+  adapter: string;
+  summary: RepoSummary;
   selection: Selection;
+  hovered: Selection;
   files: ReadonlyMap<string, RepoFile>;
   importsOf: ReadonlyMap<string, readonly ImportRecord[]>;
   targetsOf: ReadonlyMap<string, readonly string[]>;
@@ -19,22 +28,26 @@ interface DetailPaneProps {
   tab: PaneTab;
   onTab: (tab: PaneTab) => void;
   onSelect: (selection: Selection) => void;
+  onHover: (selection: Selection) => void;
   onCollapse: () => void;
 }
 
+// Everything here is already in the browser: selecting something re-reads
+// props, it never asks the server for anything.
 export function DetailPane(props: DetailPaneProps) {
   const { map, selection, tab, onTab, onCollapse } = props;
   const node = selection?.kind === "node" ? map.nodes.find((n) => n.id === selection.id) : undefined;
   const path = selection?.kind === "file" ? selection.path : null;
+  const subject = path !== null ? "file" : node ? "folder" : "repository";
 
   return (
     <aside className="flex w-[19rem] shrink-0 flex-col border-l border-border bg-surface">
       <div className="flex h-11 shrink-0 items-end gap-4 border-b border-border px-3">
-        <TabButton active={tab === "overview"} onClick={() => onTab("overview")}>
-          Overview
+        <TabButton active={tab === "structure"} onClick={() => onTab("structure")}>
+          Structure
         </TabButton>
-        <TabButton active={tab === "code"} onClick={() => onTab("code")}>
-          Code &amp; Snippet
+        <TabButton active={tab === "explanation"} onClick={() => onTab("explanation")}>
+          Explanation
         </TabButton>
         <span className="flex-1" />
         <button type="button" onClick={onCollapse} title="Hide details" className="mb-2 rounded p-1 text-muted hover:bg-background">
@@ -42,27 +55,21 @@ export function DetailPane(props: DetailPaneProps) {
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {path !== null ? (
-          tab === "overview" ? (
-            <FileOverview {...props} path={path} />
-          ) : (
-            <FileCode path={path} file={props.files.get(path)} imports={props.importsOf.get(path) ?? []} />
-          )
+        {tab === "explanation" ? (
+          <Empty icon="network" title="No explanation yet" body={`Nothing has been written about this ${subject}.`} />
+        ) : path !== null ? (
+          <FileStructure {...props} path={path} />
         ) : node ? (
-          tab === "overview" ? (
-            <NodeOverview {...props} node={node} />
-          ) : (
-            <Empty icon="network" title={node.label} body="Select a file in this folder to see its source." />
-          )
+          <FolderStructure {...props} node={node} />
         ) : (
-          <Empty icon="network" title="No node selected" body="Click any folder card or file on the canvas to inspect its dependencies." />
+          <RepoStructure {...props} />
         )}
       </div>
     </aside>
   );
 }
 
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
@@ -86,7 +93,7 @@ function Empty({ icon, title, body }: { icon: IconName; title: string; body: str
   );
 }
 
-function SectionTitle({ icon, children, aside }: { icon?: IconName; children: React.ReactNode; aside?: React.ReactNode }) {
+function SectionTitle({ icon, children, aside }: { icon?: IconName; children: ReactNode; aside?: ReactNode }) {
   return (
     <div className="mt-4 mb-1.5 flex items-center gap-1 text-[11px] font-medium text-muted">
       {icon && <Icon name={icon} className="size-3" />}
@@ -96,115 +103,243 @@ function SectionTitle({ icon, children, aside }: { icon?: IconName; children: Re
   );
 }
 
-function FileListButton({ row, selected, onClick }: { row: Pick<FileRow, "label" | "type" | "fanIn" | "fanOut">; selected?: boolean; onClick: () => void }) {
+function folderPath(id: string) {
+  return id === "." ? "./" : `${id}/`;
+}
+
+/**
+ * One file path, anywhere in the pane. Clicking moves the map's selection to
+ * it; hovering lights it on the map, and it lights up when the map hovers it.
+ */
+function PathButton({
+  path,
+  label = path,
+  aside,
+  selected = false,
+  hovered,
+  onSelect,
+  onHover,
+}: {
+  path: string;
+  /** Shown instead of the full path; the full path is always the tooltip. */
+  label?: string;
+  aside?: ReactNode;
+  selected?: boolean;
+  hovered: Selection;
+  onSelect: (s: Selection) => void;
+  onHover: (s: Selection) => void;
+}) {
+  const target: Selection = { kind: "file", path };
+  const lit = sameSelection(hovered, target);
   return (
     <button
       type="button"
-      onClick={onClick}
+      title={path}
+      onClick={() => onSelect(target)}
+      onMouseEnter={() => onHover(target)}
+      onMouseLeave={() => onHover(null)}
       className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left ${
-        selected ? "bg-accent/8 ring-1 ring-accent/40" : "hover:bg-background"
+        selected ? "bg-accent/8 ring-1 ring-accent/40" : lit ? "bg-accent/5 ring-1 ring-accent" : "hover:bg-background"
       }`}
     >
-      <span className="size-1.5 shrink-0 rounded-full" style={{ background: TYPE_COLOR[row.type] }} aria-hidden />
-      <span className={`min-w-0 flex-1 truncate font-mono text-[11px] ${selected ? "font-medium text-accent" : ""}`}>{row.label}</span>
-      <span className="flex shrink-0 gap-1.5 font-mono text-[9.5px] tabular-nums">
-        <span className="text-incoming">{row.fanIn} in</span>
-        <span className="text-outgoing">{row.fanOut} out</span>
+      <span className="size-1.5 shrink-0 rounded-full" style={{ background: TYPE_COLOR[fileTypeOf(path)] }} aria-hidden />
+      {/* Long paths lose their start, not their filename. */}
+      <span className={`min-w-0 flex-1 truncate font-mono text-[11px] ${selected ? "font-medium text-accent" : ""}`} dir="rtl">
+        <bdi>{label}</bdi>
       </span>
+      {aside && <span className="flex shrink-0 gap-1.5 font-mono text-[9.5px] tabular-nums">{aside}</span>}
     </button>
   );
 }
 
-function LinkList({ paths, rows, onSelect, empty }: { paths: readonly string[]; rows: ReadonlyMap<string, FileRow>; onSelect: (path: string) => void; empty: string }) {
+function PathList({ paths, empty, ...rest }: { paths: readonly string[]; empty: string; hovered: Selection; onSelect: (s: Selection) => void; onHover: (s: Selection) => void }) {
   if (paths.length === 0) return <p className="px-1 text-[11px] text-muted">{empty}</p>;
   return (
-    <div className="flex flex-col gap-1">
+    <div className="rounded-lg border border-border p-1">
       {paths.map((p) => (
-        <button
-          key={p}
-          type="button"
-          title={p}
-          onClick={() => onSelect(p)}
-          className="flex items-center gap-2 rounded-md border border-border px-2.5 py-2 text-left hover:border-accent/40 hover:bg-background"
-        >
-          <span className="size-1.5 shrink-0 rounded-full" style={{ background: TYPE_COLOR[rows.get(p)?.type ?? "other"] }} aria-hidden />
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px]" dir="rtl">
-            <bdi>{p}</bdi>
-          </span>
-          <Icon name="chevronRight" className="size-3 shrink-0 text-muted" />
-        </button>
+        <PathButton key={p} path={p} {...rest} />
       ))}
     </div>
   );
 }
 
-function useRows(map: RepoMap) {
-  return useMemo(() => new Map(map.nodes.flatMap((n) => n.files.map((f) => [f.path, f] as const))), [map]);
+function Stat({ label, value, note }: { label: string; value: ReactNode; note?: string }) {
+  return (
+    <div className="min-w-0 rounded-md border border-border px-2 py-1.5">
+      <p className="text-[10px] text-muted">{label}</p>
+      <p className="font-mono text-[13px] font-semibold tabular-nums">{value}</p>
+      {note && <p className="truncate text-[9.5px] text-muted" title={note}>{note}</p>}
+    </div>
+  );
 }
 
-function FileOverview({
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-2 py-0.5 text-[11px]">
+      <span className="w-16 shrink-0 text-muted">{label}</span>
+      <span className="min-w-0 flex-1">{children}</span>
+    </div>
+  );
+}
+
+/** A ranked list that shows its head and expands only when asked. */
+function RankedList({
+  files,
+  aside,
+  empty,
+  ...rest
+}: {
+  files: readonly RepoFile[];
+  aside: (f: RepoFile) => ReactNode;
+  empty: string;
+  hovered: Selection;
+  onSelect: (s: Selection) => void;
+  onHover: (s: Selection) => void;
+}) {
+  const [all, setAll] = useState(false);
+  if (files.length === 0) return <p className="px-1 text-[11px] text-muted">{empty}</p>;
+  const shown = all ? files : files.slice(0, LIST_LIMIT);
+  return (
+    <div className="rounded-lg border border-border p-1">
+      {shown.map((f) => (
+        <PathButton key={f.path} path={f.path} aside={aside(f)} {...rest} />
+      ))}
+      {files.length > LIST_LIMIT && (
+        <button type="button" onClick={() => setAll((a) => !a)} className="w-full px-2 py-1 text-left text-[10.5px] text-muted hover:text-foreground">
+          {all ? "Show fewer" : `Show all ${files.length}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function RepoStructure({ repo, adapter, summary, hovered, onSelect, onHover }: DetailPaneProps) {
+  const noAdapter = adapter === "none";
+  return (
+    <div className="px-3 pb-6">
+      <SectionTitle icon="repo">Repository</SectionTitle>
+      <p className="font-mono text-[12px] font-semibold break-all">{repo}</p>
+      <p className="mt-0.5 text-[11px] text-muted">{noAdapter ? "No framework detected" : `Framework: ${adapter}`}</p>
+
+      <div className="mt-3 grid grid-cols-3 gap-1.5">
+        <Stat label="Files" value={summary.files} />
+        <Stat label="Imports" value={summary.imports} note={`${summary.resolvedImports} to repo files`} />
+        {/* No adapter extracts routes yet. A route that can't be recovered
+            exactly is shown as absent, never as a zero. */}
+        <Stat label="Routes" value="—" note="not extracted" />
+      </div>
+
+      <SectionTitle icon="arrowDownLeft" aside={<span className="font-mono text-[10px]">{summary.mostImported.length}</span>}>
+        Most depended on
+      </SectionTitle>
+      <RankedList
+        files={summary.mostImported}
+        aside={(f) => <span className="text-incoming">{f.fanIn} in</span>}
+        empty="No file in this repository imports another."
+        hovered={hovered}
+        onSelect={onSelect}
+        onHover={onHover}
+      />
+
+      <SectionTitle icon="arrowUpRight" aside={<span className="font-mono text-[10px]">{summary.notImported.length}</span>}>
+        Nothing imports these — start reading here
+      </SectionTitle>
+      <RankedList
+        files={summary.notImported}
+        aside={(f) => <span className="text-outgoing">{f.fanOut} out</span>}
+        empty="Every file is imported by another."
+        hovered={hovered}
+        onSelect={onSelect}
+        onHover={onHover}
+      />
+
+      <SectionTitle>No convention identified</SectionTitle>
+      <p className="text-[11px]">
+        <span className="font-mono font-semibold tabular-nums">{summary.unidentified}</span>
+        <span className="text-muted"> of {summary.files} files</span>
+      </p>
+      {noAdapter && <p className="mt-0.5 text-[10.5px] text-muted">No framework adapter applied, so no file has a role.</p>}
+    </div>
+  );
+}
+
+function FileStructure({
   map,
   path,
   files,
   importsOf,
   targetsOf,
   importersOf,
+  hovered,
   onSelect,
+  onHover,
 }: DetailPaneProps & { path: string }) {
-  const rows = useRows(map);
-  const node = map.nodes.find((n) => n.id === map.nodeOf.get(path));
+  const nodeId = map.nodeOf.get(path);
   const file = files.get(path);
   const records = importsOf.get(path) ?? [];
   const unresolved = records.filter((r) => r.resolution.status === "unresolved");
   const external = new Set(records.flatMap((r) => (r.resolution.status === "external" ? [r.specifier] : [])));
-  const select = (p: string) => onSelect({ kind: "file", path: p });
+  // Counted from the very lists rendered below, so the two can't disagree.
+  const dependsOn = targetsOf.get(path) ?? [];
+  const dependedOnBy = importersOf.get(path) ?? [];
+  const ext = path.includes(".") ? path.slice(path.lastIndexOf(".")) : "no extension";
+  const list = { hovered, onSelect, onHover };
 
   return (
     <div className="px-3 pb-6">
-      {node && (
-        <>
-          <SectionTitle aside={<span className="font-mono text-[10px]">{node.files.length} files</span>}>
-            <button type="button" onClick={() => onSelect({ kind: "node", id: node.id })} className="font-mono hover:text-accent">
-              {node.id === "." ? "./" : `${node.id}/`}
-            </button>
-          </SectionTitle>
-          <div className="max-h-40 overflow-y-auto rounded-lg border border-border p-1">
-            {node.files.map((f) => (
-              <FileListButton key={f.path} row={f} selected={f.path === path} onClick={() => select(f.path)} />
-            ))}
-          </div>
-        </>
-      )}
-
-      <SectionTitle
-        aside={
-          <span className="font-mono text-[10px]">
-            {file?.lines != null ? `${file.lines} lines` : file ? `${file.bytes} bytes` : ""}
-          </span>
-        }
-      >
+      <SectionTitle>
         <span className="text-xs font-semibold text-accent">Selected file</span>
       </SectionTitle>
-      <p className="rounded-md border border-border bg-background px-2.5 py-2 font-mono text-[11px] break-all">{path}</p>
+      <PathButton path={path} selected {...list} />
+
+      <div className="mt-2">
+        <Fact label="Kind">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-1.5 rounded-full" style={{ background: TYPE_COLOR[fileTypeOf(path)] }} aria-hidden />
+            <span className="font-mono">{ext}</span>
+            <span className="text-muted">· {file?.kind === "asset" ? "asset, not parsed" : "parsed source"}</span>
+            {file?.role && <span className="text-muted">· {file.role}</span>}
+          </span>
+        </Fact>
+        <Fact label="Length">
+          <span className="font-mono tabular-nums">
+            {file?.lines != null ? `${file.lines} lines · ` : ""}
+            {file ? `${file.bytes} bytes` : ""}
+          </span>
+        </Fact>
+        {nodeId !== undefined && (
+          <Fact label="Folder">
+            <button type="button" onClick={() => onSelect({ kind: "node", id: nodeId })} className="font-mono break-all hover:text-accent">
+              {folderPath(nodeId)}
+            </button>
+          </Fact>
+        )}
+      </div>
       {file?.kind === "asset" && (
-        <p className="mt-1 text-[10.5px] text-muted">Not parsed: on the map because a parsed import resolved to it.</p>
+        <p className="mt-1 text-[10.5px] text-muted">On the map because a parsed import resolved to it.</p>
       )}
 
-      <SectionTitle icon="arrowUpRight">Imports ({targetsOf.get(path)?.length ?? 0})</SectionTitle>
-      <LinkList paths={targetsOf.get(path) ?? []} rows={rows} onSelect={select} empty="No imports of files in this repository." />
+      <SectionTitle icon="arrowUpRight" aside={<span className="font-mono text-[10px] text-outgoing">{dependsOn.length}</span>}>
+        Depends on
+      </SectionTitle>
+      <PathList paths={dependsOn} empty="Imports no file in this repository." {...list} />
       {external.size > 0 && (
         <p className="mt-1.5 px-1 font-mono text-[10.5px] leading-relaxed text-muted">
-          + {external.size} external: {[...external].slice(0, 6).join(", ")}
+          Also {external.size} external: {[...external].slice(0, 6).join(", ")}
           {external.size > 6 ? ", …" : ""}
         </p>
       )}
 
-      <SectionTitle icon="arrowDownLeft">Imported by ({importersOf.get(path)?.length ?? 0})</SectionTitle>
-      <LinkList paths={importersOf.get(path) ?? []} rows={rows} onSelect={select} empty="Nothing in this repository imports it." />
+      <SectionTitle icon="arrowDownLeft" aside={<span className="font-mono text-[10px] text-incoming">{dependedOnBy.length}</span>}>
+        Depended on by
+      </SectionTitle>
+      <PathList paths={dependedOnBy} empty="Nothing in this repository imports it." {...list} />
 
       {unresolved.length > 0 && (
         <>
-          <SectionTitle icon="alert">Unresolved ({unresolved.length})</SectionTitle>
+          <SectionTitle icon="alert" aside={<span className="font-mono text-[10px]">{unresolved.length}</span>}>
+            Unresolved imports
+          </SectionTitle>
           <div className="flex flex-col gap-1">
             {unresolved.map((r) => (
               <div key={`${r.line}:${r.specifier}`} className="rounded-md border border-border px-2.5 py-1.5">
@@ -221,116 +356,12 @@ function FileOverview({
           </div>
         </>
       )}
-
-      <ImportDeclarations path={path} file={file} imports={records} />
     </div>
   );
 }
 
-// Fetched on selection and kept for the session: the source isn't derivable
-// from the edge list, so this is the one place the pane waits on anything.
-const sourceCache = new Map<string, string | null>();
-
-function useSource(path: string, hasSource: boolean): { text: string | null; loading: boolean } {
-  const [, setVersion] = useState(0);
-  const cached = sourceCache.get(path);
-  useEffect(() => {
-    if (!hasSource || sourceCache.has(path)) return;
-    let live = true;
-    fetch(`/preview/source?path=${encodeURIComponent(path)}`)
-      .then((r) => (r.ok ? r.text() : null))
-      .catch(() => null)
-      .then((text) => {
-        sourceCache.set(path, text);
-        if (live) setVersion((v) => v + 1);
-      });
-    return () => {
-      live = false;
-    };
-  }, [path, hasSource]);
-  return { text: cached ?? null, loading: hasSource && cached === undefined };
-}
-
-function ImportDeclarations({ path, file, imports }: { path: string; file: RepoFile | undefined; imports: readonly ImportRecord[] }) {
-  const { text, loading } = useSource(path, file?.lines != null);
-  const [copied, setCopied] = useState(false);
-  const lastImport = Math.max(0, ...imports.map((r) => r.line));
-  const lines = text?.split(/\r?\n/) ?? [];
-  // The file's head down to its last import, plus a few lines of what follows.
-  const snippet = lines.slice(0, Math.min(lines.length, lastImport + 8));
-  const importLines = new Set(imports.map((r) => r.line));
-
-  return (
-    <>
-      <SectionTitle
-        aside={
-          text !== null && (
-            <button
-              type="button"
-              onClick={() => {
-                void navigator.clipboard.writeText(snippet.join("\n")).then(() => setCopied(true));
-              }}
-              onMouseLeave={() => setCopied(false)}
-              className="flex items-center gap-1 text-[10.5px] hover:text-foreground"
-            >
-              <Icon name={copied ? "check" : "copy"} className="size-3" />
-              {copied ? "Copied" : "Copy"}
-            </button>
-          )
-        }
-      >
-        Import declarations
-      </SectionTitle>
-      {file?.lines == null ? (
-        <p className="px-1 text-[11px] text-muted">Binary file, no source to show.</p>
-      ) : loading ? (
-        <p className="px-1 text-[11px] text-muted">Loading source…</p>
-      ) : text === null ? (
-        <p className="px-1 text-[11px] text-danger">Source not found in the preview fixture.</p>
-      ) : imports.length === 0 ? (
-        <p className="px-1 text-[11px] text-muted">This file has no import statements.</p>
-      ) : (
-        <CodeBlock lines={snippet} marked={importLines} />
-      )}
-    </>
-  );
-}
-
-function CodeBlock({ lines, marked, numbered = false }: { lines: readonly string[]; marked: ReadonlySet<number>; numbered?: boolean }) {
-  return (
-    <pre className="overflow-x-auto rounded-lg bg-[#111827] py-3 font-mono text-[11px] leading-[1.6] text-[#d1d5db]">
-      {lines.map((line, i) => (
-        <div key={i} className={`flex pr-3 ${marked.has(i + 1) ? "bg-white/[0.06] text-white" : ""}`}>
-          {numbered && <span className="w-10 shrink-0 pr-3 text-right text-[#6b7280] select-none">{i + 1}</span>}
-          <span className={numbered ? "" : "pl-3"}>{line || " "}</span>
-        </div>
-      ))}
-    </pre>
-  );
-}
-
-function FileCode({ path, file, imports }: { path: string; file: RepoFile | undefined; imports: readonly ImportRecord[] }) {
-  const { text, loading } = useSource(path, file?.lines != null);
-  const marked = useMemo(() => new Set(imports.map((r) => r.line)), [imports]);
-  return (
-    <div className="px-3 pb-6">
-      <SectionTitle aside={<span className="font-mono text-[10px]">{file?.lines ?? 0} lines</span>}>
-        <span className="font-mono break-all text-foreground">{path}</span>
-      </SectionTitle>
-      {file?.lines == null ? (
-        <p className="px-1 text-[11px] text-muted">Binary file, no source to show.</p>
-      ) : loading ? (
-        <p className="px-1 text-[11px] text-muted">Loading source…</p>
-      ) : text === null ? (
-        <p className="px-1 text-[11px] text-danger">Source not found in the preview fixture.</p>
-      ) : (
-        <CodeBlock lines={text.split(/\r?\n/)} marked={marked} numbered />
-      )}
-    </div>
-  );
-}
-
-function NodeOverview({ map, node, onSelect }: DetailPaneProps & { node: MapNode }) {
+function FolderStructure({ map, node, hovered, onSelect, onHover }: DetailPaneProps & { node: MapNode }) {
+  const types = useMemo(() => countTypes(node.files.map((f) => f.path)), [node]);
   const { out, into } = useMemo(() => {
     const count = (list: Map<string, number>, key: string) => list.set(key, (list.get(key) ?? 0) + 1);
     const out = new Map<string, number>();
@@ -349,21 +380,29 @@ function NodeOverview({ map, node, onSelect }: DetailPaneProps & { node: MapNode
     list.length === 0 ? (
       <p className="px-1 text-[11px] text-muted">{empty}</p>
     ) : (
-      <div className="flex flex-col gap-1">
-        {list.map(([id, n]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => onSelect({ kind: "node", id })}
-            className="flex items-center gap-2 rounded-md border border-border px-2.5 py-2 text-left hover:border-accent/40 hover:bg-background"
-          >
-            <Icon name="folder" className="size-3 shrink-0 text-muted" />
-            <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{label(id)}</span>
-            <span className="font-mono text-[10px] text-muted tabular-nums">
-              {n} {n === 1 ? "link" : "links"}
-            </span>
-          </button>
-        ))}
+      <div className="rounded-lg border border-border p-1">
+        {list.map(([id, n]) => {
+          const target: Selection = { kind: "node", id };
+          return (
+            <button
+              key={id}
+              type="button"
+              title={folderPath(id)}
+              onClick={() => onSelect(target)}
+              onMouseEnter={() => onHover(target)}
+              onMouseLeave={() => onHover(null)}
+              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left ${
+                sameSelection(hovered, target) ? "bg-accent/5 ring-1 ring-accent" : "hover:bg-background"
+              }`}
+            >
+              <Icon name="folder" className="size-3 shrink-0 text-muted" />
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{label(id)}</span>
+              <span className="font-mono text-[10px] text-muted tabular-nums">
+                {n} {n === 1 ? "link" : "links"}
+              </span>
+            </button>
+          );
+        })}
       </div>
     );
 
@@ -372,17 +411,45 @@ function NodeOverview({ map, node, onSelect }: DetailPaneProps & { node: MapNode
       <SectionTitle aside={<span className="font-mono text-[10px]">{node.files.length} files</span>}>
         <span className="text-xs font-semibold text-accent">Selected folder</span>
       </SectionTitle>
-      <p className="rounded-md border border-border bg-background px-2.5 py-2 font-mono text-[11px] break-all">
-        {node.id === "." ? "./" : `${node.id}/`}
-      </p>
-      <SectionTitle icon="arrowUpRight">Imports from ({out.length})</SectionTitle>
+      <p className="rounded-md border border-border bg-background px-2.5 py-2 font-mono text-[11px] break-all">{folderPath(node.id)}</p>
+
+      <SectionTitle>Kinds of file inside</SectionTitle>
+      <div className="rounded-lg border border-border px-2 py-1">
+        {types.map((t) => (
+          <div key={t.type} className="flex items-center gap-2 py-0.5 text-[11px]">
+            <span className="size-1.5 shrink-0 rounded-full" style={{ background: TYPE_COLOR[t.type] }} aria-hidden />
+            <span className="flex-1 font-mono">{t.label}</span>
+            <span className="font-mono tabular-nums">{t.count}</span>
+          </div>
+        ))}
+      </div>
+
+      <SectionTitle icon="arrowUpRight" aside={<span className="font-mono text-[10px]">{out.length}</span>}>
+        Imports from folders
+      </SectionTitle>
       {folderList(out, "No imports into other folders on the map.")}
-      <SectionTitle icon="arrowDownLeft">Imported by ({into.length})</SectionTitle>
+      <SectionTitle icon="arrowDownLeft" aside={<span className="font-mono text-[10px]">{into.length}</span>}>
+        Imported by folders
+      </SectionTitle>
       {folderList(into, "No other folder on the map imports from it.")}
-      <SectionTitle>Files</SectionTitle>
+
+      <SectionTitle aside={<span className="font-mono text-[10px]">{node.files.length}</span>}>Files</SectionTitle>
       <div className="rounded-lg border border-border p-1">
         {node.files.map((f) => (
-          <FileListButton key={f.path} row={f} onClick={() => onSelect({ kind: "file", path: f.path })} />
+          <PathButton
+            key={f.path}
+            path={f.path}
+            label={f.label}
+            aside={
+              <>
+                <span className="text-incoming">{f.fanIn} in</span>
+                <span className="text-outgoing">{f.fanOut} out</span>
+              </>
+            }
+            hovered={hovered}
+            onSelect={onSelect}
+            onHover={onHover}
+          />
         ))}
       </div>
     </div>

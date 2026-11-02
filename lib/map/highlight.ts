@@ -5,6 +5,12 @@ import type { FileRow, FileType, MapEdge, RepoMap } from "./model.ts";
 
 export type Selection = { kind: "file"; path: string } | { kind: "node"; id: string } | null;
 
+export function sameSelection(a: Selection, b: Selection): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.kind === "file") return b.kind === "file" && a.path === b.path;
+  return b.kind === "node" && a.id === b.id;
+}
+
 /** Relative to the selection: flowing into it, out of it, or inside a selected folder. */
 export type Direction = "in" | "out" | "internal";
 

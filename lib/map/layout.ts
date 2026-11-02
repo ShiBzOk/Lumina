@@ -2,10 +2,10 @@
 // the same data produces the same picture every time.
 
 /** Card geometry, shared with the canvas so edge anchors and cards agree. */
-export const CARD_WIDTH = 264;
-export const HEADER_HEIGHT = 46;
-export const ROW_HEIGHT = 29;
-export const LIST_PADDING = 6;
+export const CARD_WIDTH = 340;
+export const HEADER_HEIGHT = 64;
+export const ROW_HEIGHT = 40;
+export const LIST_PADDING = 10;
 export const MAX_VISIBLE_ROWS = 8;
 const GAP_X = 140;
 const GAP_Y = 56;

@@ -4,8 +4,7 @@
 //
 //   node scripts/preview-fixture.ts <repo-dir> --repo owner/name
 //
-// Writes fixtures/preview/result.json (the parser's output, untouched),
-// sources.json (the text of every parsed file, for the code preview) and
+// Writes fixtures/preview/result.json (the parser's output, untouched) and
 // meta.json (which repository and commit this is).
 
 import { execFileSync } from "node:child_process";
@@ -26,12 +25,6 @@ function main(argv: string[]): number {
   }
 
   const result = parseRepository(dir);
-  const sources: Record<string, string> = {};
-  for (const file of result.files) {
-    // Binary assets have no lines and nothing to preview.
-    if (file.lines === null) continue;
-    sources[file.path] = fs.readFileSync(path.join(result.root, file.path), "utf8");
-  }
 
   const git = (...args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
   const meta = { repo, branch: git("branch", "--show-current"), commit: git("rev-parse", "HEAD") };
@@ -44,9 +37,8 @@ function main(argv: string[]): number {
   // through the contract to prove the file still holds.
   fs.writeFileSync(resultFile, fs.readFileSync(resultFile, "utf8").replaceAll(result.root, repo));
   readParseResult(resultFile);
-  fs.writeFileSync(path.join(OUT, "sources.json"), JSON.stringify(sources));
   fs.writeFileSync(path.join(OUT, "meta.json"), JSON.stringify(meta, null, 2));
-  console.log(`${result.files.length} files, ${result.edges.length} edges, ${Object.keys(sources).length} sources → ${OUT}`);
+  console.log(`${result.files.length} files, ${result.edges.length} edges → ${OUT}`);
   return 0;
 }
 
