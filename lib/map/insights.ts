@@ -3,6 +3,7 @@
 // what they have in common.
 
 import type { Edge, RepoFile } from "../../parser/types.ts";
+import { frameworkOf } from "./frameworks.ts";
 import { adjacency, type Adjacency } from "./graph.ts";
 
 /** Fixed rather than relative: "too long" should mean the same thing in every repository. */
@@ -17,9 +18,8 @@ export const INSIGHT_SENTENCES = {
 
 export interface Insights {
   /**
-   * Files no edge points at, leaving out any file the framework adapter gave a
-   * role: pages, routes and config are reached by the framework, not by
-   * imports. Null when no adapter applied, because then entry points can't be
+   * Files no edge points at, leaving out any file whose role the framework
+   * reaches on its own (pages, route handlers, config) rather than by import. Null when no adapter applied, because then entry points can't be
    * told apart from files nothing uses, and a list mixing the two would
    * present the parser's blind spot as a fact about the code.
    */
@@ -41,9 +41,11 @@ export function findInsights(files: readonly RepoFile[], edges: readonly Edge[],
   const fanIn = (f: RepoFile) => graph.in.get(f.path)?.length ?? 0;
 
   const heavyThreshold = upperFence(files.map(fanIn).filter((n) => n > 0));
+  const framework = frameworkOf(adapter);
+  const entry = new Set(framework?.categories.filter((c) => c.entry).map((c) => c.role));
 
   return {
-    notImported: adapter === "none" ? null : files.filter((f) => fanIn(f) === 0 && f.role === null).sort(byPath),
+    notImported: framework === null ? null : files.filter((f) => fanIn(f) === 0 && !(f.role !== null && entry.has(f.role))).sort(byPath),
     heavilyImported: files.filter((f) => fanIn(f) > heavyThreshold).sort((a, b) => fanIn(b) - fanIn(a) || byPath(a, b)),
     heavyThreshold,
     cycles: findCycles(files.map((f) => f.path), graph),

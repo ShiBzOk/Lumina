@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { Project } from "ts-morph";
-import { fallbackAdapter, type FrameworkAdapter } from "./adapter.ts";
+import { selectAdapter, type FrameworkAdapter } from "./adapter.ts";
 import { extractImports } from "./extract.ts";
 import { buildEdges, fanInOut } from "./graph.ts";
 import { createResolver } from "./resolve.ts";
@@ -32,9 +32,10 @@ interface Loaded {
   sha256: string;
 }
 
-export function parseRepository(dir: string, adapter: FrameworkAdapter = fallbackAdapter): ParseResult {
+export function parseRepository(dir: string, adapters: readonly FrameworkAdapter[] = []): ParseResult {
   const walk = walkRepository(dir);
   const problems = [...walk.problems];
+  const adapter = selectAdapter(walk, adapters);
 
   // Every skip decision is made before anything resolves, so an import that
   // lands on a skipped file is reported as such rather than as an edge.
@@ -56,11 +57,11 @@ export function parseRepository(dir: string, adapter: FrameworkAdapter = fallbac
   for (const file of loaded) {
     const source = project.createSourceFile(`/${file.rel}`, file.text, { overwrite: true });
     const found = extractImports(source);
+    roles.set(file.rel, adapter.reader.read(file.rel, source));
     project.removeSourceFile(source);
 
     requireCalls += found.requireCalls;
     if (found.syntaxErrors > 0) syntaxErrors.push({ path: file.rel, count: found.syntaxErrors });
-    roles.set(file.rel, adapter.describeFile(file.rel, file.text));
 
     for (const item of found.imports) {
       imports.push({
@@ -102,6 +103,7 @@ export function parseRepository(dir: string, adapter: FrameworkAdapter = fallbac
   const edges = buildEdges(imports);
   const fan = fanInOut(files, edges);
   for (const file of files) Object.assign(file, fan.get(file.path));
+  const routes = adapter.reader.routes();
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -110,6 +112,8 @@ export function parseRepository(dir: string, adapter: FrameworkAdapter = fallbac
     files,
     edges,
     imports,
+    routes: routes.routes,
+    routesWithheld: routes.withheld,
     coverage: {
       filesFound: walk.sources.length,
       filesParsed: loaded.length,

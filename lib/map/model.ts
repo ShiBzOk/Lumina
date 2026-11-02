@@ -52,6 +52,8 @@ export interface FileRow {
   label: string;
   type: FileType;
   area: string;
+  /** What the framework adapter says this file is, or null. */
+  role: string | null;
   fanIn: number;
   fanOut: number;
 }
@@ -95,6 +97,7 @@ export function buildMap(files: readonly RepoFile[], edges: readonly Edge[]): Re
           label: n.id === "." ? path : path.slice(n.id.length + 1),
           type: fileTypeOf(path),
           area: areaOf(path),
+          role: f.role,
           fanIn: f.fanIn,
           fanOut: f.fanOut,
         },

@@ -3,12 +3,13 @@
 import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { highlight, isFiltering, matches, sameSelection, type Filter, type Selection } from "@/lib/map/highlight";
+import { frameworkOf } from "@/lib/map/frameworks";
+import { highlight, isFiltering, matches, NO_FILTER, sameSelection, type Filter, type Selection } from "@/lib/map/highlight";
 import { adjacency } from "@/lib/map/graph";
 import { findInsights } from "@/lib/map/insights";
 import { buildMap, fileTypeOf } from "@/lib/map/model";
 import { summarize } from "@/lib/map/summary";
-import type { Coverage, Edge, ImportRecord, RepoFile } from "@/parser/types";
+import type { Coverage, Edge, ImportRecord, RepoFile, Route, WithheldRoute } from "@/parser/types";
 import { Canvas, type CanvasHandle } from "./canvas";
 import { CategoryRail } from "./category-rail";
 import { CoverageBanner } from "./coverage-banner";
@@ -22,17 +23,19 @@ interface MapWorkspaceProps {
   files: RepoFile[];
   edges: Edge[];
   imports: ImportRecord[];
+  routes: Route[];
+  routesWithheld: WithheldRoute[];
   coverage: Coverage;
 }
 
 // The shell: header across the top, categories on the left, the canvas in the
 // middle, details on the right. Later phases add to these panels, not move them.
-export function MapWorkspace({ meta, adapter, files, edges, imports, coverage }: MapWorkspaceProps) {
+export function MapWorkspace({ meta, adapter, files, edges, imports, routes, routesWithheld, coverage }: MapWorkspaceProps) {
   const map = useMemo(() => buildMap(files, edges), [files, edges]);
   const [selection, setSelection] = useState<Selection>(null);
   // What the pointer is over, on the map or in the pane; each lights it in the other.
   const [hovered, setHovered] = useState<Selection>(null);
-  const [filter, setFilter] = useState<Filter>({ area: null, hiddenTypes: new Set() });
+  const [filter, setFilter] = useState<Filter>(NO_FILTER);
   const [railOpen, setRailOpen] = useState(true);
   const [paneOpen, setPaneOpen] = useState(true);
   const [tab, setTab] = useState<PaneTab>("structure");
@@ -63,6 +66,12 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, coverage }:
     return [...counts].map(([area, count]) => ({ area, count })).sort((a, b) => b.count - a.count || (a.area < b.area ? -1 : 1));
   }, [map, filter.hiddenTypes]);
   const types = useMemo(() => new Set(files.map((f) => fileTypeOf(f.path))), [files]);
+  const framework = frameworkOf(adapter);
+  const roleCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const f of files) if (f.role !== null) counts.set(f.role, (counts.get(f.role) ?? 0) + 1);
+    return counts;
+  }, [files]);
   const filtering = isFiltering(filter);
   const matchingCount = useMemo(
     () => (filtering ? map.nodes.reduce((n, node) => n + node.files.filter((f) => matches(f, filter)).length, 0) : files.length),
@@ -87,7 +96,11 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, coverage }:
     [select, map],
   );
 
-  const filterName = [filter.area, filter.hiddenTypes.size > 0 ? `${filter.hiddenTypes.size} type${filter.hiddenTypes.size > 1 ? "s" : ""} hidden` : null]
+  const filterName = [
+    framework?.categories.find((c) => c.role === filter.role)?.label,
+    filter.area,
+    filter.hiddenTypes.size > 0 ? `${filter.hiddenTypes.size} type${filter.hiddenTypes.size > 1 ? "s" : ""} hidden` : null,
+  ]
     .filter(Boolean)
     .join(" · ");
 
@@ -133,6 +146,8 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, coverage }:
             total={files.length}
             matching={areas.reduce((n, a) => n + a.count, 0)}
             areas={areas}
+            framework={framework}
+            roleCounts={roleCounts}
             types={types}
             filter={filter}
             onFilter={setFilter}
@@ -159,7 +174,7 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, coverage }:
                   <span className="font-mono">· {matchingCount} files</span>
                   <button
                     type="button"
-                    onClick={() => setFilter({ area: null, hiddenTypes: new Set() })}
+                    onClick={() => setFilter(NO_FILTER)}
                     className="underline underline-offset-2 hover:text-foreground"
                   >
                     Clear
@@ -204,7 +219,9 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, coverage }:
           <DetailPane
             map={map}
             repo={meta.repo}
-            adapter={adapter}
+            framework={framework}
+            routes={routes}
+            routesWithheld={routesWithheld}
             summary={summary}
             selection={selection}
             hovered={hovered}

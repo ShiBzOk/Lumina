@@ -66,6 +66,14 @@ export async function storeResult(
     if (error) throw new Error(`Could not store file roles: ${error.message}`);
   });
 
+  // Only routes the adapter recovered exactly; withheld ones go on the analysis row.
+  await inChunks(result.routes, "routes", progress, async (chunk) => {
+    const { error } = await db
+      .from("routes")
+      .insert(chunk.map((r) => ({ ...base, file_id: id(r.file), method: r.method, pattern: r.pattern, line: r.line })));
+    if (error) throw new Error(`Could not store routes: ${error.message}`);
+  });
+
   await inChunks(result.edges, "edges", progress, async (chunk) => {
     const { error } = await db.from("edges").insert(
       chunk.map((e) => ({

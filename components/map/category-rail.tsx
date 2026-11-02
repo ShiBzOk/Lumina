@@ -1,5 +1,6 @@
 "use client";
 
+import type { Framework } from "@/lib/map/frameworks";
 import type { Filter } from "@/lib/map/highlight";
 import { FILE_TYPES, type FileType } from "@/lib/map/model";
 import { TYPE_COLOR } from "./colors";
@@ -11,6 +12,10 @@ interface CategoryRailProps {
   matching: number;
   /** Top-level directories and how many of their files the type filter keeps, largest first. */
   areas: readonly { area: string; count: number }[];
+  /** Null when no framework adapter applied: then files have no roles to list. */
+  framework: Framework | null;
+  /** Files per role, over the whole repository. */
+  roleCounts: ReadonlyMap<string, number>;
   /** Which file types exist in this repository at all. */
   types: ReadonlySet<FileType>;
   filter: Filter;
@@ -18,7 +23,8 @@ interface CategoryRailProps {
   onCollapse: () => void;
 }
 
-export function CategoryRail({ total, matching, areas, types, filter, onFilter, onCollapse }: CategoryRailProps) {
+export function CategoryRail({ total, matching, areas, framework, roleCounts, types, filter, onFilter, onCollapse }: CategoryRailProps) {
+  const roleLabel = framework?.categories.find((c) => c.role === filter.role)?.label;
   const toggleType = (type: FileType) => {
     const hidden = new Set(filter.hiddenTypes);
     if (!hidden.delete(type)) hidden.add(type);
@@ -37,14 +43,16 @@ export function CategoryRail({ total, matching, areas, types, filter, onFilter, 
         </button>
       </div>
 
-      {filter.area !== null && (
+      {(filter.area !== null || filter.role !== null) && (
         <div className="flex items-center gap-2 border-b border-border bg-background px-3 py-2 text-[11px]">
           <span className="min-w-0 flex-1 truncate text-muted">
-            Filtering: <span className="font-mono text-foreground">{filter.area}</span>
+            Filtering: {roleLabel && <span className="text-foreground">{roleLabel}</span>}
+            {roleLabel && filter.area !== null && " · "}
+            {filter.area !== null && <span className="font-mono text-foreground">{filter.area}</span>}
           </span>
           <button
             type="button"
-            onClick={() => onFilter({ ...filter, area: null })}
+            onClick={() => onFilter({ ...filter, area: null, role: null })}
             className="flex items-center gap-0.5 text-muted underline-offset-2 hover:text-foreground hover:underline"
           >
             <Icon name="x" className="size-3" /> Clear
@@ -52,8 +60,29 @@ export function CategoryRail({ total, matching, areas, types, filter, onFilter, 
         </div>
       )}
 
-      <p className="px-3 pt-2.5 pb-1 text-[10px] text-muted">Top-level folders</p>
       <nav className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-1.5 pb-2">
+        {framework ? (
+          <>
+            <p className="px-1.5 pt-2.5 pb-1 text-[10px] text-muted">{framework.label}</p>
+            {/* Every category, always in the same order; an empty one stays in its place. */}
+            {framework.categories.map(({ role, label }) => {
+              const count = roleCounts.get(role) ?? 0;
+              return (
+                <AreaButton
+                  key={role}
+                  label={label}
+                  count={count}
+                  active={filter.role === role}
+                  disabled={count === 0}
+                  onClick={() => onFilter({ ...filter, role: filter.role === role ? null : role })}
+                />
+              );
+            })}
+          </>
+        ) : (
+          <p className="px-1.5 pt-2.5 text-[10.5px] leading-relaxed text-muted">No framework recognised, so files have no roles.</p>
+        )}
+        <p className="px-1.5 pt-3 pb-1 text-[10px] text-muted">Top-level folders</p>
         <AreaButton label="All files" count={matching} active={filter.area === null} onClick={() => onFilter({ ...filter, area: null })} />
         {areas.map(({ area, count }) => (
           <AreaButton
@@ -102,20 +131,23 @@ function AreaButton({
   count,
   active,
   mono = false,
+  disabled = false,
   onClick,
 }: {
   label: string;
   count: number;
   active: boolean;
   mono?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs ${
-        active ? "bg-foreground font-medium text-surface" : "text-foreground/80 hover:bg-background"
+      disabled={disabled}
+      className={`flex shrink-0 items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs ${
+        active ? "bg-foreground font-medium text-surface" : disabled ? "text-muted/70" : "text-foreground/80 hover:bg-background"
       }`}
     >
       <span className={`truncate ${mono ? "font-mono text-[11px]" : ""}`}>{label}</span>

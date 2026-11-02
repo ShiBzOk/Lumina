@@ -32,6 +32,7 @@ export type Database = {
           org_id: string
           package_count: number | null
           project_id: string
+          routes_withheld: Json
           stage: Database["public"]["Enums"]["analysis_stage"] | null
           stage_changed_at: string
           stage_message: string | null
@@ -51,6 +52,7 @@ export type Database = {
           org_id: string
           package_count?: number | null
           project_id: string
+          routes_withheld?: Json
           stage?: Database["public"]["Enums"]["analysis_stage"] | null
           stage_changed_at?: string
           stage_message?: string | null
@@ -70,6 +72,7 @@ export type Database = {
           org_id?: string
           package_count?: number | null
           project_id?: string
+          routes_withheld?: Json
           stage?: Database["public"]["Enums"]["analysis_stage"] | null
           stage_changed_at?: string
           stage_message?: string | null
@@ -459,6 +462,7 @@ export type Database = {
           analysis_id: string
           file_id: string
           id: string
+          line: number
           method: string
           org_id: string
           pattern: string
@@ -467,6 +471,7 @@ export type Database = {
           analysis_id: string
           file_id: string
           id?: string
+          line: number
           method: string
           org_id: string
           pattern: string
@@ -475,6 +480,7 @@ export type Database = {
           analysis_id?: string
           file_id?: string
           id?: string
+          line?: number
           method?: string
           org_id?: string
           pattern?: string

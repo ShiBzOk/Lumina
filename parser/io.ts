@@ -13,7 +13,9 @@ import {
   type ParseResult,
   type RepoFile,
   type Resolution,
+  type Route,
   type StatusCounts,
+  type WithheldRoute,
 } from "./types.ts";
 
 export function writeParseResult(file: string, result: ParseResult): void {
@@ -36,6 +38,8 @@ export function readParseResult(file: string): ParseResult {
     files: list(root, "files", at, repoFile),
     edges: list(root, "edges", at, edge),
     imports: list(root, "imports", at, importRecord),
+    routes: list(root, "routes", at, route),
+    routesWithheld: list(root, "routesWithheld", at, withheldRoute),
     coverage: coverage(get(root, "coverage"), `${at}.coverage`),
   };
 }
@@ -43,6 +47,22 @@ export function readParseResult(file: string): ParseResult {
 /** The coverage report alone, checked the same way, for wherever it is stored apart from the result. */
 export function readCoverage(value: unknown): Coverage {
   return coverage(value, "coverage");
+}
+
+/** The withheld routes alone, checked the same way, for wherever they are stored apart from the result. */
+export function readRoutesWithheld(value: unknown): WithheldRoute[] {
+  if (!Array.isArray(value)) fail("routesWithheld", "an array");
+  return value.map((v, i) => withheldRoute(v, `routesWithheld[${i}]`));
+}
+
+function route(v: unknown, at: string): Route {
+  const o = obj(v, at);
+  return { file: str(o, "file", at), line: num(o, "line", at), method: str(o, "method", at), pattern: str(o, "pattern", at) };
+}
+
+function withheldRoute(v: unknown, at: string): WithheldRoute {
+  const o = obj(v, at);
+  return { file: str(o, "file", at), line: num(o, "line", at), reason: str(o, "reason", at) };
 }
 
 function repoFile(v: unknown, at: string): RepoFile {

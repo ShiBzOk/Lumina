@@ -111,6 +111,7 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
       finished_at: new Date().toISOString(),
       adapter: result.adapter,
       coverage: toJson(result.coverage),
+      routes_withheld: toJson(result.routesWithheld),
       file_count: result.files.length,
       package_count: new Set(result.files.flatMap((f) => f.package ?? [])).size,
     });

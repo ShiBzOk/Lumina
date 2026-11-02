@@ -1,4 +1,5 @@
 import path from "node:path";
+import { ADAPTERS } from "../adapters/index.ts";
 import { readParseResult, writeParseResult } from "./io.ts";
 import { parseRepository } from "./parse.ts";
 import type { ParseResult, StatusCounts } from "./types.ts";
@@ -23,7 +24,7 @@ function main(argv: string[]): number {
   }
 
   const started = performance.now();
-  const result = parseRepository(dir);
+  const result = parseRepository(dir, ADAPTERS);
   const seconds = ((performance.now() - started) / 1000).toFixed(1);
   console.log(`Parsed ${result.root} in ${seconds}s (adapter: ${result.adapter})\n`);
   const status = report(result);
@@ -39,6 +40,7 @@ function report(r: ParseResult): number {
   const sums = c.filesParsed + c.filesSkipped === c.filesFound;
   const nodes = new Set(r.files.map((f) => f.path));
   const dangling = r.edges.filter((e) => !nodes.has(e.from) || !nodes.has(e.to));
+  const strayRoutes = [...r.routes, ...r.routesWithheld].filter((x) => !nodes.has(x.file));
 
   section("Files");
   console.log(`  found ${c.filesFound}  parsed ${c.filesParsed}  skipped ${c.filesSkipped}  ${sums ? "(adds up)" : "(DOES NOT ADD UP)"}`);
@@ -64,6 +66,18 @@ function report(r: ParseResult): number {
   console.log(`  ${r.edges.length} edges after removing duplicate file pairs`);
   console.log(`  every edge points at a node: ${dangling.length === 0 ? "yes" : `NO, ${dangling.length} do not`}`);
 
+  section(`Roles (adapter: ${r.adapter})`);
+  const roles = Map.groupBy(r.files.filter((f) => f.role !== null), (f) => f.role);
+  if (roles.size === 0) console.log("  none");
+  for (const [role, files] of roles) console.log(`  ${String(role).padEnd(14)}${String(files.length).padStart(6)}`);
+  console.log(`  ${"no role".padEnd(14)}${String(r.files.length - [...roles.values()].reduce((n, f) => n + f.length, 0)).padStart(6)}`);
+
+  section("Routes");
+  console.log(`  ${r.routes.length} extracted, ${r.routesWithheld.length} withheld`);
+  console.log(`  every route names a node: ${strayRoutes.length === 0 ? "yes" : `NO, ${strayRoutes.length} do not`}`);
+  for (const x of r.routes) console.log(`  ${x.method.padEnd(8)}${x.pattern.padEnd(48)} ${x.file}:${x.line}`);
+  for (const x of r.routesWithheld) console.log(`  withheld ${x.file}:${x.line}  ${x.reason}`);
+
   section("Unresolved");
   if (c.unresolved.length === 0) console.log("  none");
   for (const g of c.unresolved) {
@@ -77,7 +91,7 @@ function report(r: ParseResult): number {
   }
 
   // A result that breaks its own invariants must not look like a success.
-  return sums && dangling.length === 0 ? 0 : 1;
+  return sums && dangling.length === 0 && strayRoutes.length === 0 ? 0 : 1;
 }
 
 function row(label: string, s: StatusCounts): void {

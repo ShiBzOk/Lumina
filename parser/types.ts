@@ -1,7 +1,7 @@
 // The shape the parser writes to disk. Everything built after the parser reads
 // this, so it is a contract: change it and SCHEMA_VERSION goes up.
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** "source" files were parsed; "asset" files (css, json, svg…) are nodes only
  * because a parsed import resolved to them, so no edge points at nothing. */
@@ -141,6 +141,22 @@ export interface Coverage {
   configProblems: string[];
 }
 
+/** A route whose method and full pattern were both read from the syntax, nothing inferred. */
+export interface Route {
+  file: string;
+  /** Where the method is written: the decorator, or the exported handler. */
+  line: number;
+  method: string;
+  pattern: string;
+}
+
+/** A route definition the adapter saw but could not state exactly, and why. */
+export interface WithheldRoute {
+  file: string;
+  line: number;
+  reason: string;
+}
+
 export interface ParseResult {
   schemaVersion: typeof SCHEMA_VERSION;
   /** Absolute path that was parsed. */
@@ -149,5 +165,7 @@ export interface ParseResult {
   files: RepoFile[];
   edges: Edge[];
   imports: ImportRecord[];
+  routes: Route[];
+  routesWithheld: WithheldRoute[];
   coverage: Coverage;
 }

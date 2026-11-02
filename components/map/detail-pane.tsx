@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import type { Framework } from "@/lib/map/frameworks";
 import { walk, DEFAULT_DEPTH, DEPTHS, type Adjacency, type WalkDirection } from "@/lib/map/graph";
 import { sameSelection, type Selection } from "@/lib/map/highlight";
 import { INSIGHT_SENTENCES, type Insights } from "@/lib/map/insights";
 import { fileTypeOf, type MapNode, type RepoMap } from "@/lib/map/model";
 import { countTypes, type RepoSummary } from "@/lib/map/summary";
-import type { ImportRecord, RepoFile } from "@/parser/types";
+import type { ImportRecord, RepoFile, Route, WithheldRoute } from "@/parser/types";
 import { TYPE_COLOR } from "./colors";
 import { Icon, type IconName } from "./icons";
 
@@ -18,8 +19,10 @@ const LIST_LIMIT = 8;
 interface DetailPaneProps {
   map: RepoMap;
   repo: string;
-  /** The framework adapter the parser chose; "none" is the fallback. */
-  adapter: string;
+  /** The framework the adapter recognised, or null under the fallback. */
+  framework: Framework | null;
+  routes: readonly Route[];
+  routesWithheld: readonly WithheldRoute[];
   summary: RepoSummary;
   selection: Selection;
   hovered: Selection;
@@ -186,6 +189,106 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+/**
+ * Method, full pattern, and where it is written. Only what the adapter read
+ * exactly; what it saw and couldn't state is listed apart, with the reason.
+ */
+function RouteTable({
+  routes,
+  withheld,
+  empty,
+  note,
+  hovered,
+  onSelect,
+  onHover,
+}: {
+  routes: readonly Route[];
+  withheld: readonly WithheldRoute[];
+  empty: string;
+  note: string | null;
+  hovered: Selection;
+  onSelect: (s: Selection) => void;
+  onHover: (s: Selection) => void;
+}) {
+  const [all, setAll] = useState(false);
+  const [showWithheld, setShowWithheld] = useState(false);
+  const shown = all ? routes : routes.slice(0, LIST_LIMIT);
+  return (
+    <>
+      {routes.length === 0 ? (
+        <p className="px-1 text-[11px] text-muted">{empty}</p>
+      ) : (
+        <div className="rounded-lg border border-border p-1">
+          {shown.map((r) => {
+            const target: Selection = { kind: "file", path: r.file };
+            return (
+              <button
+                key={`${r.file}:${r.line}:${r.method}:${r.pattern}`}
+                type="button"
+                title={`${r.method} ${r.pattern}  ${r.file}:${r.line}`}
+                onClick={() => onSelect(target)}
+                onMouseEnter={() => onHover(target)}
+                onMouseLeave={() => onHover(null)}
+                className={`block w-full rounded-md px-2 py-1 text-left font-mono ${
+                  sameSelection(hovered, target) ? "bg-accent/5 ring-1 ring-accent" : "hover:bg-background"
+                }`}
+              >
+                <span className="flex items-baseline gap-2 text-[11px]">
+                  <span className="w-12 shrink-0 text-[10px] font-semibold text-muted">{r.method}</span>
+                  <span className="min-w-0 flex-1 truncate">{r.pattern}</span>
+                </span>
+                <span className="block truncate pl-14 text-[9.5px] text-muted" dir="rtl">
+                  <bdi>
+                    {r.file}:{r.line}
+                  </bdi>
+                </span>
+              </button>
+            );
+          })}
+          {routes.length > LIST_LIMIT && (
+            <button type="button" onClick={() => setAll((a) => !a)} className="w-full px-2 py-1 text-left text-[10.5px] text-muted hover:text-foreground">
+              {all ? "Show fewer" : `Show all ${routes.length}`}
+            </button>
+          )}
+        </div>
+      )}
+      {note && <p className="mt-1 px-1 text-[10.5px] text-muted">{note}</p>}
+      {withheld.length > 0 && (
+        <>
+          <button
+            type="button"
+            aria-expanded={showWithheld}
+            onClick={() => setShowWithheld((o) => !o)}
+            className="mt-1 flex items-center gap-1 px-1 text-[10.5px] text-muted hover:text-foreground"
+          >
+            <Icon name={showWithheld ? "chevronDown" : "chevronRight"} className="size-3" />
+            {withheld.length} withheld: method or path not exact
+          </button>
+          {showWithheld && (
+            <div className="mt-1 rounded-lg border border-border p-1">
+              {withheld.map((w) => (
+                <button
+                  key={`${w.file}:${w.line}:${w.reason}`}
+                  type="button"
+                  onClick={() => onSelect({ kind: "file", path: w.file })}
+                  className="block w-full rounded-md px-2 py-1 text-left hover:bg-background"
+                >
+                  <span className="block truncate font-mono text-[10.5px]" dir="rtl">
+                    <bdi>
+                      {w.file}:{w.line}
+                    </bdi>
+                  </span>
+                  <span className="block text-[10px] leading-snug text-muted">{w.reason}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 /** A ranked list that shows its head and expands only when asked. */
 function RankedList({
   files,
@@ -217,21 +320,44 @@ function RankedList({
   );
 }
 
-function RepoStructure({ repo, adapter, summary, insights, insightsOpen, onInsightsOpen, hovered, onSelect, onHover }: DetailPaneProps) {
-  const noAdapter = adapter === "none";
+function RepoStructure({
+  repo,
+  framework,
+  routes,
+  routesWithheld,
+  summary,
+  insights,
+  insightsOpen,
+  onInsightsOpen,
+  hovered,
+  onSelect,
+  onHover,
+}: DetailPaneProps) {
+  const noAdapter = framework === null;
   return (
     <div className="px-3 pb-6">
       <SectionTitle icon="repo">Repository</SectionTitle>
       <p className="font-mono text-[12px] font-semibold break-all">{repo}</p>
-      <p className="mt-0.5 text-[11px] text-muted">{noAdapter ? "No framework detected" : `Framework: ${adapter}`}</p>
+      <p className="mt-0.5 text-[11px] text-muted">{framework ? `Framework: ${framework.label}` : "No framework detected"}</p>
 
       <div className="mt-3 grid grid-cols-3 gap-1.5">
         <Stat label="Files" value={summary.files} />
         <Stat label="Imports" value={summary.imports} note={`${summary.resolvedImports} to repo files`} />
-        {/* No adapter extracts routes yet. A route that can't be recovered
-            exactly is shown as absent, never as a zero. */}
-        <Stat label="Routes" value="—" note="not extracted" />
+        <Stat label="Routes" value={routes.length} note={routesWithheld.length > 0 ? `${routesWithheld.length} withheld` : undefined} />
       </div>
+
+      <SectionTitle icon="network" aside={<span className="font-mono text-[10px]">{routes.length}</span>}>
+        Routes
+      </SectionTitle>
+      <RouteTable
+        routes={routes}
+        withheld={routesWithheld}
+        empty={noAdapter ? "No framework recognised, so no routes were read." : "No route could be read exactly from the source."}
+        note={framework?.routesNote ?? null}
+        hovered={hovered}
+        onSelect={onSelect}
+        onHover={onHover}
+      />
 
       <SectionTitle icon="arrowDownLeft" aside={<span className="font-mono text-[10px]">{summary.mostImported.length}</span>}>
         Most depended on
@@ -349,6 +475,7 @@ function InsightList({
 
 function FileStructure({
   map,
+  framework,
   path,
   files,
   importsOf,
@@ -381,7 +508,7 @@ function FileStructure({
             <span className="size-1.5 rounded-full" style={{ background: TYPE_COLOR[fileTypeOf(path)] }} aria-hidden />
             <span className="font-mono">{ext}</span>
             <span className="text-muted">· {file?.kind === "asset" ? "asset, not parsed" : "parsed source"}</span>
-            {file?.role && <span className="text-muted">· {file.role}</span>}
+            {file?.role && <span className="text-muted">· {framework?.categories.find((c) => c.role === file.role)?.label ?? file.role}</span>}
           </span>
         </Fact>
         <Fact label="Length">

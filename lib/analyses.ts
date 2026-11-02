@@ -1,7 +1,7 @@
 import { connection } from "next/server";
 import { createServerSupabase } from "@/lib/supabase";
 import { isStale } from "@/lib/stages";
-import { readCoverage } from "@/parser/io";
+import { readCoverage, readRoutesWithheld } from "@/parser/io";
 import {
   EXCLUDED_REASONS,
   EXTERNAL_REASONS,
@@ -12,6 +12,8 @@ import {
   type ImportRecord,
   type RepoFile,
   type Resolution,
+  type Route,
+  type WithheldRoute,
 } from "@/parser/types";
 
 // No organization filter anywhere in here, on purpose. Which rows come back is
@@ -54,7 +56,7 @@ export async function getAnalysis(id: string) {
   const { data, error } = await supabase
     .from("analyses")
     .select(
-      `id, project_id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, adapter, coverage, created_at, ${PROJECT}`,
+      `id, project_id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, adapter, coverage, routes_withheld, created_at, ${PROJECT}`,
     )
     .eq("id", id)
     .maybeSingle();
@@ -68,6 +70,8 @@ export interface StoredGraph {
   files: RepoFile[];
   edges: Edge[];
   imports: ImportRecord[];
+  routes: Route[];
+  routesWithheld: WithheldRoute[];
   coverage: Coverage;
 }
 
@@ -99,7 +103,7 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
   const id = analysis.id;
   const count = (c: boolean) => (c ? ("exact" as const) : undefined);
 
-  const [fileRows, roleRows, edgeRows, importRows] = await Promise.all([
+  const [fileRows, roleRows, edgeRows, importRows, routeRows] = await Promise.all([
     readAll("files", (from, to, c) =>
       supabase
         .from("files")
@@ -129,6 +133,14 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
       supabase
         .from("imports")
         .select("file_id, specifier, kind, type_only, line, status, reason, target, detail", { count: count(c) })
+        .eq("analysis_id", id)
+        .order("id")
+        .range(from, to),
+    ),
+    readAll("routes", (from, to, c) =>
+      supabase
+        .from("routes")
+        .select("file_id, method, pattern, line", { count: count(c) })
         .eq("analysis_id", id)
         .order("id")
         .range(from, to),
@@ -176,7 +188,19 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
     resolution: resolution(r),
   }));
 
-  return { files, edges, imports, coverage: readCoverage(analysis.coverage) };
+  // Stored in insertion order, which was the adapter's; sorted again so the table doesn't depend on it.
+  const routes: Route[] = routeRows
+    .map((r) => ({ file: path(r.file_id, "routes.file_id"), line: r.line, method: r.method, pattern: r.pattern }))
+    .sort((a, b) => compare(a.pattern, b.pattern) || compare(a.method, b.method) || compare(a.file, b.file));
+
+  return {
+    files,
+    edges,
+    imports,
+    routes,
+    routesWithheld: readRoutesWithheld(analysis.routes_withheld),
+    coverage: readCoverage(analysis.coverage),
+  };
 }
 
 function resolution(r: { status: string; reason: string | null; target: string | null; detail: string | null }): Resolution {

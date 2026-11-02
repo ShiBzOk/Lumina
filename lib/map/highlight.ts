@@ -55,16 +55,24 @@ export function highlight(map: RepoMap, selection: Selection): Highlight | null 
   return { edges, files, nodes, handles };
 }
 
+export const NO_FILTER: Filter = { area: null, role: null, hiddenTypes: new Set() };
+
 export interface Filter {
   /** Top-level directory, or null for every file. */
   area: string | null;
+  /** A framework role from the rail, or null for every file. */
+  role: string | null;
   hiddenTypes: ReadonlySet<FileType>;
 }
 
 export function isFiltering(filter: Filter): boolean {
-  return filter.area !== null || filter.hiddenTypes.size > 0;
+  return filter.area !== null || filter.role !== null || filter.hiddenTypes.size > 0;
 }
 
-export function matches(row: Pick<FileRow, "area" | "type">, filter: Filter): boolean {
-  return (filter.area === null || row.area === filter.area) && !filter.hiddenTypes.has(row.type);
+export function matches(row: Pick<FileRow, "area" | "type" | "role">, filter: Filter): boolean {
+  return (
+    (filter.area === null || row.area === filter.area) &&
+    (filter.role === null || row.role === filter.role) &&
+    !filter.hiddenTypes.has(row.type)
+  );
 }
