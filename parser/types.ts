@@ -1,7 +1,7 @@
 // The shape the parser writes to disk. Everything built after the parser reads
 // this, so it is a contract: change it and SCHEMA_VERSION goes up.
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /** "source" files were parsed; "asset" files (css, json, svg…) are nodes only
  * because a parsed import resolved to them, so no edge points at nothing. */
@@ -27,8 +27,9 @@ export interface RepoFile {
   fanOut: number;
 }
 
-export type ImportKind = "import" | "re-export" | "dynamic-import";
-export const IMPORT_KINDS: readonly ImportKind[] = ["import", "re-export", "dynamic-import"];
+/** "require" is a CommonJS `require()` call or TypeScript's `import x = require()`. */
+export type ImportKind = "import" | "re-export" | "dynamic-import" | "require";
+export const IMPORT_KINDS: readonly ImportKind[] = ["import", "re-export", "dynamic-import", "require"];
 
 export type ExternalReason = "builtin" | "package" | "outside-repo";
 export const EXTERNAL_REASONS: readonly ExternalReason[] = ["builtin", "package", "outside-repo"];
@@ -135,8 +136,6 @@ export interface Coverage {
   imports: StatusCounts;
   importsByKind: Record<ImportKind, StatusCounts>;
   unresolved: UnresolvedGroup[];
-  /** Seen but not handled in this version. Counted so they aren't invisible. */
-  deferred: { require: number };
   /** tsconfig / package.json problems met while resolving. */
   configProblems: string[];
 }

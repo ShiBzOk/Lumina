@@ -60,9 +60,19 @@ export const NESTJS_CATEGORIES = [
   { role: "decorator", label: "Decorators", entry: false },
 ] as const satisfies readonly RoleCategory[];
 
+export const EXPRESS_CATEGORIES = [
+  { role: "router", label: "Routers", entry: false },
+  { role: "controller", label: "Controllers", entry: false },
+  { role: "service", label: "Services", entry: false },
+  { role: "model", label: "Models", entry: false },
+  { role: "middleware", label: "Middleware", entry: false },
+  { role: "config", label: "Config", entry: false },
+] as const satisfies readonly RoleCategory[];
+
 export type ReactRole = (typeof REACT_CATEGORIES)[number]["role"];
 export type NextjsRole = (typeof NEXTJS_CATEGORIES)[number]["role"];
 export type NestjsRole = (typeof NESTJS_CATEGORIES)[number]["role"];
+export type ExpressRole = (typeof EXPRESS_CATEGORIES)[number]["role"];
 
 export const FRAMEWORKS: readonly Framework[] = [
   {
@@ -72,6 +82,12 @@ export const FRAMEWORKS: readonly Framework[] = [
     routesNote: "Pages aren't listed: a page's method isn't written in its file.",
   },
   { adapter: "nestjs", label: "NestJS", categories: NESTJS_CATEGORIES, routesNote: null },
+  {
+    adapter: "express",
+    label: "Express",
+    categories: EXPRESS_CATEGORIES,
+    routesNote: "Express assembles its routes at runtime from routers, variables and middleware chains, so none can be read from the source.",
+  },
   {
     adapter: "react",
     label: "React",

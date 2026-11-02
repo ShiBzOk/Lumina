@@ -163,6 +163,7 @@ function coverage(v: unknown, at: string): Coverage {
       import: statusCounts(get(kinds, "import"), `${at}.importsByKind.import`),
       "re-export": statusCounts(get(kinds, "re-export"), `${at}.importsByKind.re-export`),
       "dynamic-import": statusCounts(get(kinds, "dynamic-import"), `${at}.importsByKind.dynamic-import`),
+      require: statusCounts(get(kinds, "require"), `${at}.importsByKind.require`),
     },
     unresolved: list(o, "unresolved", at, (g, gAt) => {
       const go = obj(g, gAt);
@@ -180,7 +181,6 @@ function coverage(v: unknown, at: string): Coverage {
         }),
       };
     }),
-    deferred: { require: num(obj(get(o, "deferred"), `${at}.deferred`), "require", `${at}.deferred`) },
     configProblems: list(o, "configProblems", at, (p, pAt) => {
       if (typeof p !== "string") fail(pAt, "a string");
       return p;

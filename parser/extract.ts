@@ -2,9 +2,9 @@ import { Node, SyntaxKind, type SourceFile } from "ts-morph";
 import type { ImportKind } from "./types.ts";
 
 export interface FoundImport {
-  /** The literal specifier, or null when a dynamic import's argument is an expression. */
+  /** The literal specifier, or null when a dynamic import's or require's argument is an expression. */
   specifier: string | null;
-  /** What was written, for reporting non-literal dynamic imports. */
+  /** What was written, for reporting non-literal specifiers. */
   text: string;
   kind: ImportKind;
   typeOnly: boolean;
@@ -13,8 +13,6 @@ export interface FoundImport {
 
 export interface Extraction {
   imports: FoundImport[];
-  /** require() and `import x = require()` calls: deferred, counted, not resolved. */
-  requireCalls: number;
   syntaxErrors: number;
 }
 
@@ -22,7 +20,6 @@ export interface Extraction {
 // `declare module` blocks and dynamic imports anywhere in a function are seen.
 export function extractImports(file: SourceFile): Extraction {
   const imports: FoundImport[] = [];
-  let requireCalls = 0;
 
   file.forEachDescendant((node) => {
     if (Node.isImportDeclaration(node)) {
@@ -53,25 +50,38 @@ export function extractImports(file: SourceFile): Extraction {
         }
       }
     } else if (Node.isImportEqualsDeclaration(node)) {
-      if (Node.isExternalModuleReference(node.getModuleReference())) requireCalls += 1;
+      // `import x = require("./y")` is TypeScript's spelling of a require; the
+      // grammar only allows a string literal there.
+      const reference = node.getModuleReference();
+      if (!Node.isExternalModuleReference(reference)) return;
+      const argument = reference.getExpression();
+      if (!argument || !Node.isStringLiteral(argument)) return;
+      const specifier = argument.getLiteralValue();
+      imports.push({ specifier, text: specifier, kind: "require", typeOnly: node.isTypeOnly(), line: node.getStartLineNumber() });
     } else if (Node.isCallExpression(node)) {
       const callee = node.getExpression();
-      if (callee.getKind() === SyntaxKind.ImportKeyword) {
-        const [argument] = node.getArguments();
-        const line = node.getStartLineNumber();
-        if (argument && (Node.isStringLiteral(argument) || Node.isNoSubstitutionTemplateLiteral(argument))) {
-          const specifier = argument.getLiteralValue();
-          imports.push({ specifier, text: specifier, kind: "dynamic-import", typeOnly: false, line });
-        } else {
-          imports.push({ specifier: null, text: argument?.getText() ?? "", kind: "dynamic-import", typeOnly: false, line });
-        }
-      } else if (Node.isIdentifier(callee) && callee.getText() === "require") {
-        requireCalls += 1;
+      // `require.resolve()` and `module.require()` are property accesses, so only
+      // a bare call to `require` lands here.
+      if (callee.getKind() === SyntaxKind.ImportKeyword) imports.push(callArgument(node.getArguments(), "dynamic-import", node.getStartLineNumber()));
+      else if (Node.isIdentifier(callee) && callee.getText() === "require") {
+        imports.push(callArgument(node.getArguments(), "require", node.getStartLineNumber()));
       }
     }
   });
 
-  return { imports, requireCalls, syntaxErrors: syntaxErrorCount(file) };
+  return { imports, syntaxErrors: syntaxErrorCount(file) };
+}
+
+// The first argument names the module only when it is a string literal.
+// Anything else, a variable, a template with substitutions, an AMD-style
+// array, is known only at runtime.
+function callArgument(args: Node[], kind: ImportKind, line: number): FoundImport {
+  const [argument] = args;
+  if (argument && (Node.isStringLiteral(argument) || Node.isNoSubstitutionTemplateLiteral(argument))) {
+    const specifier = argument.getLiteralValue();
+    return { specifier, text: specifier, kind, typeOnly: false, line };
+  }
+  return { specifier: null, text: argument?.getText() ?? "", kind, typeOnly: false, line };
 }
 
 // TypeScript keeps parse errors on the source file but doesn't expose them in

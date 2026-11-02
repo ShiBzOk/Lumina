@@ -1,4 +1,4 @@
-import { Node, type SourceFile } from "ts-morph";
+import { Node, SyntaxKind, type SourceFile } from "ts-morph";
 
 // Reading a file's own statements, nothing more. No type checker and no other
 // file: what a file exports is what its statements say it exports.
@@ -45,6 +45,48 @@ export function exportedNames(source: SourceFile): Exports {
     }
   }
   return { names, star };
+}
+
+/**
+ * The names a CommonJS module assigns at its top level: `exports.a = …`,
+ * `module.exports.a = …`, the keys of `module.exports = { … }`, and the name of
+ * a named function or class assigned to `module.exports`. A spread or a computed
+ * key isn't listed, because which names it adds is only known at runtime.
+ */
+export function commonjsExports(source: SourceFile): ExportedName[] {
+  const names: ExportedName[] = [];
+  const add = (name: string, node: Node, value: Node | undefined, isDefault = false) =>
+    names.push({ name, line: node.getStartLineNumber(), reexport: value !== undefined && isRequire(value), isDefault });
+
+  for (const statement of source.getStatements()) {
+    if (!Node.isExpressionStatement(statement)) continue;
+    const assignment = statement.getExpression();
+    if (!Node.isBinaryExpression(assignment) || assignment.getOperatorToken().getKind() !== SyntaxKind.EqualsToken) continue;
+    const target = assignment.getLeft().getText().replace(/\s+/g, "");
+    const value = assignment.getRight();
+
+    const member = /^(?:module\.)?exports\.([A-Za-z_$][\w$]*)$/.exec(target);
+    if (member) add(member[1], statement, value);
+    if (target !== "module.exports") continue;
+    if (Node.isObjectLiteralExpression(value)) {
+      for (const property of value.getProperties()) {
+        if (Node.isShorthandPropertyAssignment(property)) add(property.getName(), property, undefined);
+        else if (Node.isPropertyAssignment(property) && !Node.isComputedPropertyName(property.getNameNode())) {
+          add(property.getName(), property, property.getInitializer());
+        } else if (Node.isMethodDeclaration(property) && !Node.isComputedPropertyName(property.getNameNode())) {
+          add(property.getName(), property, undefined);
+        }
+      }
+    } else if (Node.isFunctionExpression(value) || Node.isClassExpression(value)) {
+      const name = value.getName();
+      if (name) add(name, statement, value, true);
+    }
+  }
+  return names;
+}
+
+function isRequire(node: Node): boolean {
+  return Node.isCallExpression(node) && node.getExpression().getText() === "require";
 }
 
 /** Whether the file's directive prologue holds this directive, e.g. "use server". */

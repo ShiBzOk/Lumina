@@ -60,7 +60,6 @@ function report(r: ParseResult): number {
   console.log(`  ${"kind".padEnd(16)}${["found", "internal", "external", "excluded", "unresolved"].map((h) => h.padStart(11)).join("")}`);
   row("all", c.imports);
   for (const [kind, counts] of Object.entries(c.importsByKind)) row(kind, counts);
-  console.log(`  require() calls seen, not handled in this version: ${c.deferred.require}`);
 
   section("Edges");
   console.log(`  ${r.edges.length} edges after removing duplicate file pairs`);

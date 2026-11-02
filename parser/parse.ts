@@ -52,7 +52,6 @@ export function parseRepository(dir: string, adapters: readonly FrameworkAdapter
   const imports: ImportRecord[] = [];
   const syntaxErrors: Coverage["syntaxErrors"] = [];
   const roles = new Map<string, string | null>();
-  let requireCalls = 0;
 
   for (const file of loaded) {
     const source = project.createSourceFile(`/${file.rel}`, file.text, { overwrite: true });
@@ -60,7 +59,6 @@ export function parseRepository(dir: string, adapters: readonly FrameworkAdapter
     roles.set(file.rel, adapter.reader.read(file.rel, source));
     project.removeSourceFile(source);
 
-    requireCalls += found.requireCalls;
     if (found.syntaxErrors > 0) syntaxErrors.push({ path: file.rel, count: found.syntaxErrors });
 
     for (const item of found.imports) {
@@ -125,7 +123,6 @@ export function parseRepository(dir: string, adapters: readonly FrameworkAdapter
       imports: countStatuses(imports),
       importsByKind: byKind(imports),
       unresolved: groupUnresolved(imports),
-      deferred: { require: requireCalls },
       configProblems: [...new Set(problems)],
     },
   };
@@ -191,7 +188,7 @@ function countStatuses(imports: readonly ImportRecord[]): StatusCounts {
 
 function byKind(imports: readonly ImportRecord[]): Record<ImportKind, StatusCounts> {
   const of = (kind: ImportKind) => countStatuses(imports.filter((r) => r.kind === kind));
-  return { import: of("import"), "re-export": of("re-export"), "dynamic-import": of("dynamic-import") };
+  return { import: of("import"), "re-export": of("re-export"), "dynamic-import": of("dynamic-import"), require: of("require") };
 }
 
 function groupUnresolved(imports: readonly ImportRecord[]): UnresolvedGroup[] {

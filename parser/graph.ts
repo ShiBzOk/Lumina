@@ -18,7 +18,7 @@ export function buildEdges(imports: readonly ImportRecord[]): Edge[] {
       byPair.set(key, { from, to, kinds: [record.kind], typeOnly: record.typeOnly });
     }
   }
-  const order: ImportKind[] = ["import", "re-export", "dynamic-import"];
+  const order: ImportKind[] = ["import", "re-export", "dynamic-import", "require"];
   return [...byPair.values()]
     .map((e) => ({ ...e, kinds: order.filter((k) => e.kinds.includes(k)) }))
     .sort((a, b) => compare(a.from, b.from) || compare(a.to, b.to));

@@ -278,10 +278,15 @@ export function createResolver(
     if (isBuiltin(specifier)) return { status: "external", reason: "builtin", detail: specifier };
     const fromAbs = `${root}/${fromRel}`;
     const config = configForDir(path.posix.dirname(fromAbs));
+    // The call itself says which loader runs, whatever the file's own format:
+    // import() is always ESM and require() always CommonJS, which decides the
+    // package.json "exports" condition. Everything else follows the file.
     const mode =
       kind === "dynamic-import"
         ? ts.ModuleKind.ESNext
-        : ts.getImpliedNodeFormatForFile(fromAbs, config.cache.getPackageJsonInfoCache(), host, config.options);
+        : kind === "require"
+          ? ts.ModuleKind.CommonJS
+          : ts.getImpliedNodeFormatForFile(fromAbs, config.cache.getPackageJsonInfoCache(), host, config.options);
     let resolved: string | undefined;
     try {
       resolved = ts.resolveModuleName(specifier, fromAbs, config.options, host, config.cache, undefined, mode)
