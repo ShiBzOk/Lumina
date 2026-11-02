@@ -74,7 +74,8 @@ export const NodeCard = memo(function NodeCard({
         </div>
         <span className="shrink-0 rounded-full bg-background px-2 py-0.5 font-mono text-[10.5px] text-muted">
           {overflow && `${offset + 1}–${offset + shown.length} of `}
-          {filtering && matching !== node.files.length ? `${matching}/${node.files.length}` : node.files.length} files
+          {/* While filtering every card says how many matched, so the counts on screen add up to the rail's. */}
+          {filtering ? `${matching}/${node.files.length}` : node.files.length} files
         </span>
         <span className="shrink-0 cursor-grab text-muted/70 active:cursor-grabbing" title="Drag to move">
           <Icon name="move" className="size-3.5" />

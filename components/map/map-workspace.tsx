@@ -4,6 +4,8 @@ import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { highlight, isFiltering, matches, sameSelection, type Filter, type Selection } from "@/lib/map/highlight";
+import { adjacency } from "@/lib/map/graph";
+import { findInsights } from "@/lib/map/insights";
 import { buildMap, fileTypeOf } from "@/lib/map/model";
 import { summarize } from "@/lib/map/summary";
 import type { Edge, ImportRecord, RepoFile } from "@/parser/types";
@@ -32,30 +34,32 @@ export function MapWorkspace({ meta, adapter, files, edges, imports }: MapWorksp
   const [railOpen, setRailOpen] = useState(true);
   const [paneOpen, setPaneOpen] = useState(true);
   const [tab, setTab] = useState<PaneTab>("structure");
+  // Lives here so it stays shut until asked, however often the pane redraws.
+  const [insightsOpen, setInsightsOpen] = useState(false);
   const canvas = useRef<CanvasHandle>(null);
 
   const lit = useMemo(() => highlight(map, selection), [map, selection]);
   const summary = useMemo(() => summarize(files, imports), [files, imports]);
   const byPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
-  const { importsOf, targetsOf, importersOf } = useMemo(() => {
-    const importsOf = Map.groupBy(
-      imports.toSorted((a, b) => a.line - b.line),
-      (r) => r.from,
-    );
-    const targetsOf = new Map<string, string[]>();
-    const importersOf = new Map<string, string[]>();
-    for (const e of edges) {
-      targetsOf.set(e.from, [...(targetsOf.get(e.from) ?? []), e.to]);
-      importersOf.set(e.to, [...(importersOf.get(e.to) ?? []), e.from]);
-    }
-    return { importsOf, targetsOf, importersOf };
-  }, [imports, edges]);
+  const importsOf = useMemo(
+    () =>
+      Map.groupBy(
+        imports.toSorted((a, b) => a.line - b.line),
+        (r) => r.from,
+      ),
+    [imports],
+  );
+  const graph = useMemo(() => adjacency(edges), [edges]);
+  const insights = useMemo(() => findInsights(files, edges, adapter), [files, edges, adapter]);
 
+  // Counted under the type filter too, so an area's number is the sum of
+  // what its cards say matched.
   const areas = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const n of map.nodes) for (const f of n.files) counts.set(f.area, (counts.get(f.area) ?? 0) + 1);
+    for (const n of map.nodes)
+      for (const f of n.files) if (!filter.hiddenTypes.has(f.type)) counts.set(f.area, (counts.get(f.area) ?? 0) + 1);
     return [...counts].map(([area, count]) => ({ area, count })).sort((a, b) => b.count - a.count || (a.area < b.area ? -1 : 1));
-  }, [map]);
+  }, [map, filter.hiddenTypes]);
   const types = useMemo(() => new Set(files.map((f) => fileTypeOf(f.path))), [files]);
   const filtering = isFiltering(filter);
   const matchingCount = useMemo(
@@ -128,6 +132,7 @@ export function MapWorkspace({ meta, adapter, files, edges, imports }: MapWorksp
         {railOpen && (
           <CategoryRail
             total={files.length}
+            matching={areas.reduce((n, a) => n + a.count, 0)}
             areas={areas}
             types={types}
             filter={filter}
@@ -206,8 +211,10 @@ export function MapWorkspace({ meta, adapter, files, edges, imports }: MapWorksp
             hovered={hovered}
             files={byPath}
             importsOf={importsOf}
-            targetsOf={targetsOf}
-            importersOf={importersOf}
+            graph={graph}
+            insights={insights}
+            insightsOpen={insightsOpen}
+            onInsightsOpen={setInsightsOpen}
             tab={tab}
             onTab={setTab}
             onSelect={selectAndReveal}

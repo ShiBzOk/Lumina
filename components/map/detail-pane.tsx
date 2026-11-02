@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import { walk, DEFAULT_DEPTH, DEPTHS, type Adjacency, type WalkDirection } from "@/lib/map/graph";
 import { sameSelection, type Selection } from "@/lib/map/highlight";
+import { INSIGHT_SENTENCES, type Insights } from "@/lib/map/insights";
 import { fileTypeOf, type MapNode, type RepoMap } from "@/lib/map/model";
 import { countTypes, type RepoSummary } from "@/lib/map/summary";
 import type { ImportRecord, RepoFile } from "@/parser/types";
@@ -23,8 +25,10 @@ interface DetailPaneProps {
   hovered: Selection;
   files: ReadonlyMap<string, RepoFile>;
   importsOf: ReadonlyMap<string, readonly ImportRecord[]>;
-  targetsOf: ReadonlyMap<string, readonly string[]>;
-  importersOf: ReadonlyMap<string, readonly string[]>;
+  graph: Adjacency;
+  insights: Insights;
+  insightsOpen: boolean;
+  onInsightsOpen: (open: boolean) => void;
   tab: PaneTab;
   onTab: (tab: PaneTab) => void;
   onSelect: (selection: Selection) => void;
@@ -213,7 +217,7 @@ function RankedList({
   );
 }
 
-function RepoStructure({ repo, adapter, summary, hovered, onSelect, onHover }: DetailPaneProps) {
+function RepoStructure({ repo, adapter, summary, insights, insightsOpen, onInsightsOpen, hovered, onSelect, onHover }: DetailPaneProps) {
   const noAdapter = adapter === "none";
   return (
     <div className="px-3 pb-6">
@@ -259,7 +263,87 @@ function RepoStructure({ repo, adapter, summary, hovered, onSelect, onHover }: D
         <span className="text-muted"> of {summary.files} files</span>
       </p>
       {noAdapter && <p className="mt-0.5 text-[10.5px] text-muted">No framework adapter applied, so no file has a role.</p>}
+
+      {/* Last, and shut until asked: this explains a codebase, it doesn't grade one. */}
+      <button
+        type="button"
+        aria-expanded={insightsOpen}
+        onClick={() => onInsightsOpen(!insightsOpen)}
+        className="mt-5 flex w-full items-center gap-1 border-t border-border pt-3 text-left text-[11px] font-medium text-muted hover:text-foreground"
+      >
+        <Icon name={insightsOpen ? "chevronDown" : "chevronRight"} className="size-3" />
+        Insights
+      </button>
+      {insightsOpen && <InsightList insights={insights} hovered={hovered} onSelect={onSelect} onHover={onHover} />}
     </div>
+  );
+}
+
+/** Files nothing imports first, because that one explains; loops and long files read closer to a verdict. */
+function InsightList({
+  insights,
+  ...list
+}: {
+  insights: Insights;
+  hovered: Selection;
+  onSelect: (s: Selection) => void;
+  onHover: (s: Selection) => void;
+}) {
+  const count = (n: number) => <span className="font-mono text-[10px]">{n}</span>;
+  return (
+    <>
+      <SectionTitle aside={insights.notImported && count(insights.notImported.length)}>{INSIGHT_SENTENCES.notImported}</SectionTitle>
+      {insights.notImported === null ? (
+        <p className="px-1 text-[10.5px] leading-relaxed text-muted">
+          Not listed. No framework was recognised, so the files a framework reaches on its own (pages, routes, config) can&apos;t be
+          told apart from files nothing uses.
+        </p>
+      ) : (
+        <RankedList
+          files={insights.notImported}
+          aside={(f) => <span className="text-outgoing">{f.fanOut} out</span>}
+          empty="Every file without a framework role is imported by another."
+          {...list}
+        />
+      )}
+
+      <SectionTitle aside={count(insights.heavilyImported.length)}>{INSIGHT_SENTENCES.heavilyImported}</SectionTitle>
+      {Number.isFinite(insights.heavyThreshold) && (
+        <p className="mb-1.5 px-1 text-[10.5px] text-muted">
+          More than <span className="font-mono">{insights.heavyThreshold}</span> importers, far outside the spread of the rest.
+        </p>
+      )}
+      <RankedList
+        files={insights.heavilyImported}
+        aside={(f) => <span className="text-incoming">{f.fanIn} in</span>}
+        empty="No file is imported far more than the rest."
+        {...list}
+      />
+
+      <SectionTitle aside={count(insights.cycles.length)}>{INSIGHT_SENTENCES.cycles}</SectionTitle>
+      {insights.cycles.length === 0 ? (
+        <p className="px-1 text-[11px] text-muted">No file imports itself through others.</p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {insights.cycles.map((loop) => (
+            <div key={loop.join("\0")} className="rounded-lg border border-border p-1">
+              {loop.map((p, i) => (
+                <PathButton key={p} path={p} aside={<span className="text-muted">{i + 1}</span>} {...list} />
+              ))}
+              <p className="px-2 pt-0.5 pb-1 text-[10px] text-muted">Each imports the next; the last imports the first.</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <SectionTitle aside={count(insights.long.length)}>{INSIGHT_SENTENCES.long}</SectionTitle>
+      <RankedList
+        files={insights.long}
+        aside={(f) => <span className="text-muted">{f.lines} lines</span>}
+        empty="No file is that long."
+        {...list}
+      />
+    </>
   );
 }
 
@@ -268,8 +352,7 @@ function FileStructure({
   path,
   files,
   importsOf,
-  targetsOf,
-  importersOf,
+  graph,
   hovered,
   onSelect,
   onHover,
@@ -280,8 +363,8 @@ function FileStructure({
   const unresolved = records.filter((r) => r.resolution.status === "unresolved");
   const external = new Set(records.flatMap((r) => (r.resolution.status === "external" ? [r.specifier] : [])));
   // Counted from the very lists rendered below, so the two can't disagree.
-  const dependsOn = targetsOf.get(path) ?? [];
-  const dependedOnBy = importersOf.get(path) ?? [];
+  const dependsOn = graph.out.get(path) ?? [];
+  const dependedOnBy = graph.in.get(path) ?? [];
   const ext = path.includes(".") ? path.slice(path.lastIndexOf(".")) : "no extension";
   const list = { hovered, onSelect, onHover };
 
@@ -318,6 +401,8 @@ function FileStructure({
       {file?.kind === "asset" && (
         <p className="mt-1 text-[10.5px] text-muted">On the map because a parsed import resolved to it.</p>
       )}
+
+      <Walk path={path} graph={graph} {...list} />
 
       <SectionTitle icon="arrowUpRight" aside={<span className="font-mono text-[10px] text-outgoing">{dependsOn.length}</span>}>
         Depends on
@@ -357,6 +442,102 @@ function FileStructure({
         </>
       )}
     </div>
+  );
+}
+
+const WALKS: { direction: WalkDirection; label: string; icon: IconName; color: string; note: string; empty: string }[] = [
+  {
+    direction: "dependents",
+    label: "Blast radius",
+    icon: "arrowDownLeft",
+    color: "text-incoming",
+    note: "Files that would feel a change to this one, by how many imports away they are.",
+    empty: "Nothing in this repository imports it.",
+  },
+  {
+    direction: "dependencies",
+    label: "Dependency chain",
+    icon: "arrowUpRight",
+    color: "text-outgoing",
+    note: "Files this one needs, by how many imports away they are.",
+    empty: "Imports no file in this repository.",
+  },
+];
+
+/** Blast radius and dependency chain: one walk over the edge list, run in the browser on click. */
+function Walk({
+  path,
+  graph,
+  ...list
+}: {
+  path: string;
+  graph: Adjacency;
+  hovered: Selection;
+  onSelect: (s: Selection) => void;
+  onHover: (s: Selection) => void;
+}) {
+  // Kept as the selection moves, so the same walk can be compared across files.
+  const [direction, setDirection] = useState<WalkDirection | null>(null);
+  const [depth, setDepth] = useState<number>(DEFAULT_DEPTH);
+  const reached = useMemo(() => (direction ? walk(graph, path, direction, depth) : []), [graph, path, direction, depth]);
+  const active = WALKS.find((w) => w.direction === direction);
+  // Only the chosen level is shown. A file sits at the shortest distance it is
+  // reached by, so one that is a direct neighbour never reappears further out.
+  const atDepth = reached.filter((r) => r.depth === depth).map((r) => r.path);
+
+  return (
+    <>
+      <div className="mt-3 grid grid-cols-2 gap-1.5">
+        {WALKS.map((w) => (
+          <button
+            key={w.direction}
+            type="button"
+            aria-pressed={direction === w.direction}
+            onClick={() => setDirection((d) => (d === w.direction ? null : w.direction))}
+            className={`flex items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium ${
+              direction === w.direction ? "border-accent/40 bg-accent/8 text-accent" : "border-border hover:bg-background"
+            }`}
+          >
+            <Icon name={w.icon} className="size-3" />
+            {w.label}
+          </button>
+        ))}
+      </div>
+      {active && (
+        <>
+          <SectionTitle aside={<span className={`font-mono text-[10px] ${active.color}`}>{atDepth.length} files</span>}>
+            {active.label}
+          </SectionTitle>
+          <p className="mb-2 px-1 text-[10.5px] text-muted">{active.note}</p>
+          <div className="mb-2 flex items-center gap-2 px-1 text-[10.5px] text-muted">
+            <span>Levels deep</span>
+            <div className="flex rounded-md border border-border p-0.5" role="group" aria-label="Levels deep">
+              {DEPTHS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  aria-pressed={depth === d}
+                  onClick={() => setDepth(d)}
+                  className={`w-6 rounded py-0.5 font-mono text-[10.5px] tabular-nums ${
+                    depth === d ? "bg-accent/10 font-semibold text-accent" : "hover:bg-background hover:text-foreground"
+                  }`}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+          </div>
+          {reached.length === 0 ? (
+            <p className="px-1 text-[11px] text-muted">{active.empty}</p>
+          ) : (
+            <>
+              <p className="mb-0.5 px-1 text-[10px] text-muted">{depth === 1 ? "Directly" : `${depth} steps away`}</p>
+              <PathList paths={atDepth} empty={`No file is exactly ${depth} steps away.`} {...list} />
+            </>
+          )}
+        </>
+      )}
+    </>
   );
 }
 

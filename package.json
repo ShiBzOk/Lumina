@@ -9,6 +9,7 @@
     "lint": "eslint",
     "parse": "node parser/cli.ts",
     "check:map": "node scripts/check-map.ts",
+    "check:insights": "node scripts/check-insights.ts",
     "preview:fixture": "node scripts/preview-fixture.ts"
   },
   "dependencies": {

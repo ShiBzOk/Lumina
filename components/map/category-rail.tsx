@@ -7,7 +7,9 @@ import { Icon } from "./icons";
 
 interface CategoryRailProps {
   total: number;
-  /** Top-level directories and how many files each holds, largest first. */
+  /** Files not hidden by the type filter: the sum of the area counts. */
+  matching: number;
+  /** Top-level directories and how many of their files the type filter keeps, largest first. */
   areas: readonly { area: string; count: number }[];
   /** Which file types exist in this repository at all. */
   types: ReadonlySet<FileType>;
@@ -16,7 +18,7 @@ interface CategoryRailProps {
   onCollapse: () => void;
 }
 
-export function CategoryRail({ total, areas, types, filter, onFilter, onCollapse }: CategoryRailProps) {
+export function CategoryRail({ total, matching, areas, types, filter, onFilter, onCollapse }: CategoryRailProps) {
   const toggleType = (type: FileType) => {
     const hidden = new Set(filter.hiddenTypes);
     if (!hidden.delete(type)) hidden.add(type);
@@ -52,7 +54,7 @@ export function CategoryRail({ total, areas, types, filter, onFilter, onCollapse
 
       <p className="px-3 pt-2.5 pb-1 text-[10px] text-muted">Top-level folders</p>
       <nav className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-1.5 pb-2">
-        <AreaButton label="All files" count={total} active={filter.area === null} onClick={() => onFilter({ ...filter, area: null })} />
+        <AreaButton label="All files" count={matching} active={filter.area === null} onClick={() => onFilter({ ...filter, area: null })} />
         {areas.map(({ area, count }) => (
           <AreaButton
             key={area}
