@@ -4,7 +4,7 @@ import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 export default function WorkspaceLayout({ children }: LayoutProps<"/">) {
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-6">
         <span className="text-[17px] font-semibold tracking-[-0.02em]">
           Lumina
         </span>
