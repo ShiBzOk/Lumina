@@ -2,19 +2,12 @@
 
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { isFiltering, matches, type Filter, type Highlight, type Selection } from "@/lib/map/highlight";
-import {
-  CARD_WIDTH,
-  HEADER_HEIGHT,
-  LIST_PADDING,
-  MAX_VISIBLE_ROWS,
-  ROW_HEIGHT,
-  cardHeight,
-  type Point,
-} from "@/lib/map/layout";
-import type { MapNode, RepoMap } from "@/lib/map/model";
+import { CARD_WIDTH, MAX_VISIBLE_ROWS, cardHeight, edgePath, type Point } from "@/lib/map/layout";
+import type { MapEdge, MapNode, RepoMap } from "@/lib/map/model";
 import { DIRECTION_COLOR } from "./colors";
 import { Icon, type IconName } from "./icons";
 import { Minimap, type Bounds } from "./minimap";
+import { lerp, spring } from "./motion";
 import { NodeCard } from "./node-card";
 
 export interface Viewport {
@@ -101,12 +94,91 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
   const [onlyLit, setOnlyLit] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const gesture = useRef<Gesture | null>(null);
+  // What a click set moving. A gesture cancels it and carries on from what's
+  // on screen; a wheel or drag is never animated, it follows the hand.
+  const glide = useRef<{ from: Viewport; to: Viewport; cancel: () => void } | null>(null);
+  // Stops a card animation and hands back where the cards were left.
+  const arranging = useRef<(() => ReadonlyMap<string, Point>) | null>(null);
 
   // Read inside observers and native listeners, which outlive a render.
   const live = useRef({ viewport, size, positions, compact });
   useEffect(() => {
     live.current = { viewport, size, positions, compact };
   });
+  useEffect(
+    () => () => {
+      glide.current?.cancel();
+      arranging.current?.();
+    },
+    [],
+  );
+
+  const stopGlide = useCallback(() => {
+    glide.current?.cancel();
+    glide.current = null;
+  }, []);
+
+  // Linear in x, y and k together, which keeps a zoom's anchor point still the whole way.
+  const glideTo = useCallback((to: Viewport) => {
+    glide.current?.cancel();
+    const g = { from: live.current.viewport, to, cancel: () => {} };
+    g.cancel = spring((p) => {
+      setViewport({ x: lerp(g.from.x, g.to.x, p), y: lerp(g.from.y, g.to.y, p), k: lerp(g.from.k, g.to.k, p) });
+      if (p === 1 && glide.current === g) glide.current = null;
+    });
+    glide.current = g;
+  }, []);
+
+  // Cards travel to their new places with their edges attached. The frames
+  // in between are written straight to the page: going through state would
+  // redraw every card and edge sixty times a second. State hears only where
+  // they start, and where they stop: `to` itself, so a reset is
+  // recognisably the layout again, or wherever a drag interrupted them.
+  const arrange = (
+    set: (ps: ReadonlyMap<string, Point>) => void,
+    from: ReadonlyMap<string, Point>,
+    to: ReadonlyMap<string, Point>,
+    compactAfter: boolean,
+  ) => {
+    arranging.current?.();
+    set(from);
+    let at = from;
+    let cards: [HTMLElement, string][] | null = null;
+    let paths: [SVGPathElement, MapEdge, number | null, number | null][] | null = null;
+    const stop = spring((p) => {
+      if (p === 1) {
+        arranging.current = null;
+        return set(to);
+      }
+      // Gathered on the first frame, once the click's render has put the right cards and edges on the page.
+      cards ??= Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-card]") ?? [], (el) => [el, el.dataset.card ?? ""]);
+      paths ??= Array.from(rootRef.current?.querySelectorAll<SVGPathElement>("path[data-edge]") ?? [], (el) => {
+        const e = map.edges[Number(el.dataset.edge)];
+        return [el, e, compactAfter ? null : rowSlot(e.fromNode, e.from), compactAfter ? null : rowSlot(e.toNode, e.to)];
+      });
+      const next = new Map<string, Point>();
+      for (const [id, b] of to) {
+        const a = from.get(id) ?? b;
+        next.set(id, { x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p) });
+      }
+      at = next;
+      for (const [el, id] of cards) {
+        const q = at.get(id);
+        if (q) el.style.transform = `translate(${q.x}px, ${q.y}px)`;
+      }
+      for (const [el, e, fromSlot, toSlot] of paths) {
+        const a = at.get(e.fromNode);
+        const b = at.get(e.toNode);
+        if (a && b) el.setAttribute("d", edgePath(a, b, fromSlot, toSlot, e.fromNode === e.toNode));
+      }
+    });
+    arranging.current = () => {
+      stop();
+      arranging.current = null;
+      set(at);
+      return at;
+    };
+  };
 
   const filtering = isFiltering(filter);
   const rowIndex = useMemo(() => {
@@ -129,6 +201,15 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
       const prev = live.current.size;
       setSize({ w, h });
       if (w === 0 || h === 0) return;
+      // Mid-glide, keep its destination where it was on screen and let it finish.
+      const g = glide.current;
+      if (g && prev.w !== 0) {
+        const dx = (w - prev.w) / 2;
+        const dy = (h - prev.h) / 2;
+        g.from = { ...g.from, x: g.from.x + dx, y: g.from.y + dy };
+        g.to = { ...g.to, x: g.to.x + dx, y: g.to.y + dy };
+        return;
+      }
       const fitted = fit(boundsOf(map.nodes, live.current.positions, live.current.compact), w, h);
       if (prev.w === 0) return setViewport(fitted);
       setViewport((v) => (fitted.k < v.k ? fitted : { ...v, x: v.x + (w - prev.w) / 2, y: v.y + (h - prev.h) / 2 }));
@@ -163,6 +244,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
     let pending = 0;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      stopGlide();
       const delta = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 16 : e.deltaY;
       const rows = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-rows]") : null;
       if (rows?.dataset.rows && !e.ctrlKey) {
@@ -181,7 +263,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [zoomAt, step]);
+  }, [zoomAt, step, stopGlide]);
 
   useEffect(() => {
     const onChange = () => setFullscreen(document.fullscreenElement !== null);
@@ -211,19 +293,21 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
         const top = p.y * v.k + v.y;
         const inView = left >= 0 && top >= 0 && left + CARD_WIDTH * v.k <= s.w && top + h * v.k <= s.h;
         if (inView) return;
-        setViewport({ k: v.k, x: s.w / 2 - (p.x + CARD_WIDTH / 2) * v.k, y: s.h / 2 - (p.y + h / 2) * v.k });
+        glideTo({ k: v.k, x: s.w / 2 - (p.x + CARD_WIDTH / 2) * v.k, y: s.h / 2 - (p.y + h / 2) * v.k });
       },
     }),
-    [rowCount, rowIndex],
+    [rowCount, rowIndex, glideTo],
   );
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || !(e.target instanceof Element)) return;
     if (e.target.closest("[data-overlay]")) return;
+    stopGlide();
     const header = e.target.closest<HTMLElement>("[data-card-header]");
     if (header) {
       const id = header.dataset.cardHeader ?? "";
-      const p = positions.get(id);
+      // Mid-animation, the card is grabbed where it is on screen, not where state last put it.
+      const p = (arranging.current?.() ?? positions).get(id);
       if (!p) return;
       gesture.current = { type: "drag", id, sx: e.clientX, sy: e.clientY, px: p.x, py: p.y, moved: false };
     } else {
@@ -272,14 +356,13 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
   const onSelectFile = useCallback((path: string) => onSelect({ kind: "file", path }), [onSelect]);
 
   // Where a file sits in its card's window, or null when it isn't shown.
-  // Compact cards show no rows, so every connection meets a header.
+  // Compact cards show no rows, so there every connection meets a header.
   const rowSlot = useCallback(
     (node: string, path: string) => {
-      if (compact) return null;
       const slot = (rowIndex.get(path) ?? 0) - (offsets.get(node) ?? 0);
       return slot >= 0 && slot < MAX_VISIBLE_ROWS ? slot : null;
     },
-    [rowIndex, offsets, compact],
+    [rowIndex, offsets],
   );
 
   const edgePaths = useMemo(() => {
@@ -295,8 +378,8 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
       const b = positions.get(e.toNode);
       if (!a || !b) return;
       const direction = highlight?.edges.get(i);
-      const fromSlot = rowSlot(e.fromNode, e.from);
-      const toSlot = rowSlot(e.toNode, e.to);
+      const fromSlot = compact ? null : rowSlot(e.fromNode, e.from);
+      const toSlot = compact ? null : rowSlot(e.toNode, e.to);
       // Only files on screen are connected. A lit edge is the exception: a
       // selection never loses a connection, so its hidden end meets the header.
       const hot = hoveredPath !== null && (e.from === hoveredPath || e.to === hoveredPath);
@@ -310,34 +393,23 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
         if (drawn.has(key)) return;
         drawn.add(key);
       }
-      const rowY = (slot: number | null) => (slot === null ? HEADER_HEIGHT / 2 : HEADER_HEIGHT + LIST_PADDING + slot * ROW_HEIGHT + ROW_HEIGHT / 2);
-      const x1 = a.x + CARD_WIDTH;
-      const y1 = a.y + rowY(fromSlot);
-      const y2 = b.y + rowY(toSlot);
-      // Within one folder the curve loops out of the right side and back in;
-      // between folders it leaves the importer's right and enters the target's left.
-      const same = e.fromNode === e.toNode;
-      const x2 = same ? x1 : b.x;
-      // A link back to a column on the left (a cycle) bends tightly: scaled to
-      // the distance, it would swing far out past the cards into empty canvas.
-      const dx = same ? 36 + Math.abs(y2 - y1) * 0.25 : x2 > x1 ? Math.max(60, (x2 - x1) * 0.5) : 60;
-      const d = `M${x1},${y1} C${x1 + dx},${y1} ${same ? x2 + dx : x2 - dx},${y2} ${x2},${y2}`;
+      const d = edgePath(a, b, fromSlot, toSlot, e.fromNode === e.toNode);
 
       if (hot) {
         // Coloured as a click would colour it, relative to the hovered file.
         const towards = e.from === hoveredPath ? "out" : "in";
-        top.push(<path key={i} d={d} stroke={DIRECTION_COLOR[towards]} strokeWidth={3} fill="none" />);
+        top.push(<path key={i} data-edge={i} d={d} stroke={DIRECTION_COLOR[towards]} strokeWidth={3} fill="none" />);
         return;
       }
       if (direction) {
-        lit.push(<path key={i} d={d} stroke={DIRECTION_COLOR[direction]} strokeWidth={2.5} fill="none" />);
+        lit.push(<path key={i} data-edge={i} d={d} stroke={DIRECTION_COLOR[direction]} strokeWidth={2.5} fill="none" />);
         return;
       }
       const from = rowsByPath.get(e.from);
       const to = rowsByPath.get(e.to);
       const filteredOut = filtering && (!from || !to || !matches(from, filter) || !matches(to, filter));
       const opacity = highlight ? 0.18 : filteredOut ? 0.2 : 0.9;
-      quiet.push(<path key={i} d={d} stroke="var(--edge)" strokeWidth={1} strokeOpacity={opacity} fill="none" />);
+      quiet.push(<path key={i} data-edge={i} d={d} stroke="var(--edge)" strokeWidth={1} strokeOpacity={opacity} fill="none" className="transition-[stroke-opacity] duration-150" />);
     });
     return [...quiet, ...lit, ...top];
   }, [map.edges, positions, rowSlot, highlight, hovered, filtering, filter, rowsByPath, compact, onlyLit]);
@@ -368,7 +440,14 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
     [map.nodes, highlight, positions, compact],
   );
 
-  const zoomBy = (factor: number) => zoomAt(size.w / 2, size.h / 2, factor);
+  // From where a running zoom is headed, so quick clicks add up rather than restart.
+  const zoomBy = (factor: number) => {
+    const v = glide.current?.to ?? viewport;
+    const k = clampZoom(v.k * factor);
+    const cx = size.w / 2;
+    const cy = size.h / 2;
+    glideTo({ k, x: cx - (cx - v.x) * (k / v.k), y: cy - (cy - v.y) * (k / v.k) });
+  };
 
   return (
     <div
@@ -387,7 +466,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
       }}
     >
       <div
-        className="absolute top-0 left-0 origin-top-left"
+        className="absolute top-0 left-0 origin-top-left transition-opacity duration-300 ease-out starting:opacity-0"
         style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})` }}
       >
         <svg className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1} aria-hidden>
@@ -418,20 +497,27 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
         {banner}
       </div>
 
-      {minimap && (
-        <div data-overlay className="absolute top-3 right-3">
-          <Minimap
-            nodes={map.nodes}
-            positions={positions}
-            bounds={bounds}
-            viewport={viewport}
-            size={size}
-            lit={highlight?.nodes ?? null}
-            compact={compact}
-            onCenter={(x, y) => setViewport((v) => ({ ...v, x: size.w / 2 - x * v.k, y: size.h / 2 - y * v.k }))}
-          />
-        </div>
-      )}
+      {/* Kept mounted so it can fade from and to its corner. */}
+      <div
+        data-overlay
+        inert={!minimap}
+        className={`absolute top-3 right-3 origin-top-right transition-[opacity,scale] duration-200 ease-out ${minimap ? "" : "pointer-events-none scale-95 opacity-0"}`}
+      >
+        <Minimap
+          nodes={map.nodes}
+          positions={positions}
+          bounds={bounds}
+          viewport={viewport}
+          size={size}
+          lit={highlight?.nodes ?? null}
+          compact={compact}
+          // Follows the pointer as it drags, so never glides.
+          onCenter={(x, y) => {
+            stopGlide();
+            setViewport((v) => ({ ...v, x: size.w / 2 - x * v.k, y: size.h / 2 - y * v.k }));
+          }}
+        />
+      </div>
 
       {children}
 
@@ -439,7 +525,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
         data-overlay
         className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-xl bg-surface p-1 shadow-[0_2px_10px_rgba(16,24,40,0.08)] ring-1 ring-border"
       >
-        <ToolButton icon="undo" label="Reset card layout" disabled={positions === laidOut} onClick={() => setPositions(laidOut)} />
+        <ToolButton icon="undo" label="Reset card layout" disabled={positions === laidOut} onClick={() => arrange(setPositions, positions, laidOut, compact)} />
         <ToolButton icon="map" label="Minimap" active={minimap} onClick={() => setMinimap((m) => !m)} />
         <Divider />
         <ToolButton
@@ -448,9 +534,12 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
           active={compact}
           onClick={() => {
             const next = !compact;
+            const target = next ? compactPositions : fullPositions;
             setCompact(next);
+            // Each card travels from where it is now to its place in the other view.
+            arrange(next ? setCompactPositions : setFullPositions, positions, target, next);
             // The cards change size and place, so the old view would frame nothing in particular.
-            setViewport(fit(boundsOf(map.nodes, next ? compactPositions : fullPositions, next), size.w, size.h));
+            glideTo(fit(boundsOf(map.nodes, target, next), size.w, size.h));
           }}
         />
         <ToolButton icon="links" label="Only the selection's links" active={onlyLit} onClick={() => setOnlyLit((o) => !o)} />
@@ -458,15 +547,15 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
           icon="focus"
           label="Fit to selection"
           disabled={litBounds === null}
-          onClick={() => litBounds && setViewport(fit(litBounds, size.w, size.h))}
+          onClick={() => litBounds && glideTo(fit(litBounds, size.w, size.h))}
         />
         <Divider />
         <ToolButton icon="zoomOut" label="Zoom out" onClick={() => zoomBy(1 / 1.2)} />
         <button
           type="button"
           title="Fit to screen"
-          onClick={() => setViewport(fit(bounds, size.w, size.h))}
-          className="w-12 rounded-md py-1.5 text-center font-mono text-[11px] text-muted tabular-nums hover:bg-background"
+          onClick={() => glideTo(fit(bounds, size.w, size.h))}
+          className="w-12 rounded-md py-1.5 transition-[scale] duration-100 active:scale-95 text-center font-mono text-[11px] text-muted tabular-nums hover:bg-background"
         >
           {Math.round(viewport.k * 100)}%
         </button>
@@ -504,7 +593,7 @@ function ToolButton({
       aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
-      className={`flex size-8 items-center justify-center rounded-lg ${
+      className={`flex size-8 items-center justify-center rounded-lg transition-[scale] duration-100 enabled:active:scale-90 ${
         active ? "bg-accent/10 text-accent" : disabled ? "text-muted/40" : "text-muted hover:bg-background hover:text-foreground"
       }`}
     >

@@ -52,9 +52,10 @@ export const NodeCard = memo(function NodeCard({
   const dimmed = (highlight !== null && !lit) || matching === 0;
 
   return (
+    // Dimming fades; nothing else on a card animates, its position least of all.
     <div
       data-card={node.id}
-      className={`absolute top-0 left-0 rounded-2xl bg-surface shadow-[0_1px_2px_rgba(16,24,40,0.04),0_6px_20px_rgba(16,24,40,0.05)] ring-1 ${
+      className={`absolute top-0 left-0 rounded-2xl bg-surface transition-opacity duration-150 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_6px_20px_rgba(16,24,40,0.05)] ring-1 ${
         isSelected ? "ring-2 ring-accent" : isHovered ? "ring-accent" : lit ? "ring-accent/60" : "ring-border/70"
       } ${dimmed && !isHovered && !traced ? "opacity-30" : ""}`}
       style={{ width: CARD_WIDTH, transform: `translate(${position.x}px, ${position.y}px)` }}
@@ -154,7 +155,7 @@ function Row({
         e.preventDefault();
         onSelect(file.path);
       }}
-      className={`relative mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-3 rounded-lg px-5 text-left ${
+      className={`relative mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-3 rounded-lg px-5 text-left transition-opacity duration-150 ${
         selected ? "bg-accent/8 ring-1 ring-accent/40" : hovered ? "bg-background ring-1 ring-border" : "hover:bg-background"
       } ${dimmed ? "opacity-40" : ""}`}
       style={{ height: ROW_HEIGHT }}

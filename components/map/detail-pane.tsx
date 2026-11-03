@@ -9,7 +9,7 @@ import { fileTypeOf, type MapNode, type RepoMap } from "@/lib/map/model";
 import { countTypes, type RepoSummary } from "@/lib/map/summary";
 import type { ImportRecord, RepoFile, Route, WithheldRoute } from "@/parser/types";
 import { TYPE_COLOR } from "./colors";
-import { Explanation, explainKey, type ExplainState } from "./explanation";
+import { Explanation, explainKey, type ExplainState, type Handed } from "./explanation";
 import { Icon, type IconName } from "./icons";
 
 export type PaneTab = "structure" | "explanation";
@@ -61,7 +61,7 @@ export function DetailPane(props: DetailPaneProps) {
   const folderIds = useMemo(() => new Set(map.nodes.map((n) => n.id)), [map]);
 
   return (
-    <aside className="flex w-[19rem] shrink-0 flex-col border-l border-border bg-surface">
+    <aside className="flex w-full flex-col border-l border-border bg-surface">
       <div className="flex h-11 shrink-0 items-end gap-4 border-b border-border px-3">
         <TabButton active={tab === "structure"} onClick={() => onTab("structure")}>
           Structure
@@ -80,11 +80,7 @@ export function DetailPane(props: DetailPaneProps) {
             <Explanation
               analysisId={props.analysisId}
               subject={target}
-              context={
-                target.kind === "file"
-                  ? `The model is handed its source, the ${graph.out.get(target.path)?.length ?? 0} files it imports and the ${graph.in.get(target.path)?.length ?? 0} files importing it, as the parser found them.`
-                  : `The model is handed this folder's ${node?.files.length ?? 0} files and the imports into and out of it, as the parser found them.`
-              }
+              handed={target.kind === "file" ? fileHanded(target.path, graph) : folderHanded(node?.files.map((f) => f.path) ?? [], graph)}
               unexplainable={target.kind === "file" && files.get(target.path)?.kind === "asset" ? "Assets aren't parsed, so there is nothing to explain from." : null}
               state={props.explanations.get(explainKey(target))}
               model={props.model}
@@ -109,6 +105,25 @@ export function DetailPane(props: DetailPaneProps) {
       </div>
     </aside>
   );
+}
+
+function fileHanded(path: string, graph: Adjacency): Handed[] {
+  return [
+    { icon: "fileCode", label: "Source" },
+    { icon: "arrowUpRight", label: "Files it imports", count: graph.out.get(path)?.length ?? 0, tone: "out" },
+    { icon: "arrowDownLeft", label: "Files importing it", count: graph.in.get(path)?.length ?? 0, tone: "in" },
+  ];
+}
+
+// Only links that cross the folder's edge: the ones inside it are the folder talking to itself.
+function folderHanded(paths: readonly string[], graph: Adjacency): Handed[] {
+  const inside = new Set(paths);
+  const crossing = (links: Adjacency["out"]) => paths.reduce((n, p) => n + (links.get(p) ?? []).filter((q) => !inside.has(q)).length, 0);
+  return [
+    { icon: "folder", label: "Files in it", count: paths.length },
+    { icon: "arrowUpRight", label: "Imports out of it", count: crossing(graph.out), tone: "out" },
+    { icon: "arrowDownLeft", label: "Imports into it", count: crossing(graph.in), tone: "in" },
+  ];
 }
 
 function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {

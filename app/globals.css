@@ -15,6 +15,19 @@
   --incoming: #12924f;
   --outgoing: #c96a04;
   --edge: #c3c9d3;
+  /* The one curve everything moves on: a critically damped spring, response
+     0.35s, sampled. components/map/motion.ts runs the same spring in script,
+     so a panel and the map it resizes settle together. No overshoot, because
+     nothing here was thrown. */
+  --spring: linear(0, 0.058, 0.181, 0.321, 0.456, 0.574, 0.672, 0.751, 0.813, 0.861, 0.897, 0.924, 0.945, 0.96, 0.971, 0.979, 0.985, 0.989, 0.992, 0.994, 0.996, 0.997, 0.998, 0.999, 1);
+  --spring-duration: 515ms;
+}
+
+/* Not zero: a panel waits for its transition to end before it unmounts. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --spring-duration: 1ms;
+  }
 }
 
 @theme inline {

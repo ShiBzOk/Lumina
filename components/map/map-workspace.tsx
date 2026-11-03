@@ -15,6 +15,7 @@ import { Canvas, type CanvasHandle } from "./canvas";
 import { CategoryRail } from "./category-rail";
 import { CoverageBanner } from "./coverage-banner";
 import { DetailPane, type PaneTab } from "./detail-pane";
+import { Drawer } from "./drawer";
 import { explainKey, type ExplainState } from "./explanation";
 import { Icon } from "./icons";
 import { FileSearch } from "./file-search";
@@ -58,7 +59,7 @@ export function MapWorkspace({ meta, repositories, adapter, files, edges, import
     async (subject: NonNullable<Selection>) => {
       const key = explainKey(subject);
       const set = (state: ExplainState) => setExplanations((prev) => new Map(prev).set(key, state));
-      set({ status: "loading" });
+      set({ status: "loading", since: Date.now() });
       try {
         const result = await explain(meta.analysisId, subject);
         set(result.ok ? { status: "done", ...result } : { status: "error", message: result.error });
@@ -148,7 +149,7 @@ export function MapWorkspace({ meta, repositories, adapter, files, edges, import
       <CoverageBanner coverage={coverage} />
 
       <div className="flex min-h-0 flex-1">
-        {railOpen && (
+        <Drawer open={railOpen} side="left" width="15rem">
           <CategoryRail
             total={files.length}
             framework={framework}
@@ -159,7 +160,7 @@ export function MapWorkspace({ meta, repositories, adapter, files, edges, import
             onFilter={setFilter}
             onCollapse={() => setRailOpen(false)}
           />
-        )}
+        </Drawer>
 
         <Canvas
           ref={canvas}
@@ -197,13 +198,14 @@ export function MapWorkspace({ meta, repositories, adapter, files, edges, import
             </div>
           }
         >
+          {/* Each fades in as its panel finishes leaving, where the panel went. */}
           {!railOpen && (
             <button
               data-overlay
               type="button"
               title="Show categories"
               onClick={() => setRailOpen(true)}
-              className="absolute top-3 left-3 flex size-9 items-center justify-center rounded-xl bg-surface text-muted shadow-[0_1px_6px_rgba(16,24,40,0.06)] ring-1 ring-border hover:text-foreground"
+              className="absolute top-3 left-3 flex size-9 items-center justify-center rounded-xl bg-surface text-muted shadow-[0_1px_6px_rgba(16,24,40,0.06)] ring-1 ring-border transition-[opacity,scale] delay-200 duration-200 ease-out hover:text-foreground starting:scale-90 starting:opacity-0"
             >
               <Icon name="layers" className="size-4" />
             </button>
@@ -214,14 +216,14 @@ export function MapWorkspace({ meta, repositories, adapter, files, edges, import
               type="button"
               title="Show details"
               onClick={() => setPaneOpen(true)}
-              className="absolute top-32 right-3 flex size-9 items-center justify-center rounded-xl bg-surface text-muted shadow-[0_1px_6px_rgba(16,24,40,0.06)] ring-1 ring-border hover:text-foreground"
+              className="absolute top-32 right-3 flex size-9 items-center justify-center rounded-xl bg-surface text-muted shadow-[0_1px_6px_rgba(16,24,40,0.06)] ring-1 ring-border transition-[opacity,scale] delay-200 duration-200 ease-out hover:text-foreground starting:scale-90 starting:opacity-0"
             >
               <Icon name="network" className="size-4" />
             </button>
           )}
         </Canvas>
 
-        {paneOpen && (
+        <Drawer open={paneOpen} side="right" width="19rem">
           <DetailPane
             analysisId={meta.analysisId}
             map={map}
@@ -249,7 +251,7 @@ export function MapWorkspace({ meta, repositories, adapter, files, edges, import
             onHover={hover}
             onCollapse={() => setPaneOpen(false)}
           />
-        )}
+        </Drawer>
       </div>
     </div>
   );

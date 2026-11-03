@@ -31,7 +31,7 @@ export function CategoryRail({ total, framework, roleCounts, modelRoleCounts, ty
   };
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">
+    <aside className="flex w-full flex-col border-r border-border bg-surface">
       <div className="flex h-11 items-center gap-2 border-b border-border px-3">
         <Icon name="layers" className="size-3.5 text-muted" />
         <span className="text-xs font-medium">Categories</span>

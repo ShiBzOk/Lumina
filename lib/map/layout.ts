@@ -20,6 +20,26 @@ export interface Point {
   y: number;
 }
 
+/**
+ * The curve for one connection, from the importer's card at `a` to the
+ * target's at `b`. A null slot is a file not on screen: that end meets the
+ * card's header. One function, so a card being animated and a card at rest
+ * draw their edges identically.
+ */
+export function edgePath(a: Point, b: Point, fromSlot: number | null, toSlot: number | null, sameNode: boolean): string {
+  const rowY = (slot: number | null) => (slot === null ? HEADER_HEIGHT / 2 : HEADER_HEIGHT + LIST_PADDING + slot * ROW_HEIGHT + ROW_HEIGHT / 2);
+  const x1 = a.x + CARD_WIDTH;
+  const y1 = a.y + rowY(fromSlot);
+  const y2 = b.y + rowY(toSlot);
+  // Within one folder the curve loops out of the right side and back in;
+  // between folders it leaves the importer's right and enters the target's left.
+  const x2 = sameNode ? x1 : b.x;
+  // A link back to a column on the left (a cycle) bends tightly: scaled to
+  // the distance, it would swing far out past the cards into empty canvas.
+  const dx = sameNode ? 36 + Math.abs(y2 - y1) * 0.25 : x2 > x1 ? Math.max(60, (x2 - x1) * 0.5) : 60;
+  return `M${x1},${y1} C${x1 + dx},${y1} ${sameNode ? x2 + dx : x2 - dx},${y2} ${x2},${y2}`;
+}
+
 export interface NodeLink {
   from: string;
   to: string;
