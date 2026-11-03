@@ -8,7 +8,6 @@ async function Repositories({ searchParams }: { searchParams: PageProps<"/">["se
   const rows: RepositoryRow[] = analyses.map((a) => ({
     id: a.id,
     repo: a.project ? `${a.project.repo_owner}/${a.project.repo_name}` : "(unknown repository)",
-    description: a.project?.description ?? null,
     branch: a.branch,
     status: a.status,
     stage: a.stage,

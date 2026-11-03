@@ -15,6 +15,9 @@
   --incoming: #12924f;
   --outgoing: #c96a04;
   --edge: #c3c9d3;
+  /* The artwork's deep teal: the brand on screens outside the map, where blue
+     would be the map's selection colour leaking out. */
+  --petrol: #123e49;
   /* The one curve everything moves on: a critically damped spring, response
      0.35s, sampled. components/map/motion.ts runs the same spring in script,
      so a panel and the map it resizes settle together. No overshoot, because
@@ -42,6 +45,7 @@
   --color-incoming: var(--incoming);
   --color-outgoing: var(--outgoing);
   --color-edge: var(--edge);
+  --color-petrol: var(--petrol);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

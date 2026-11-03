@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { rerunAnalysis } from "@/app/analyses/actions";
 import { Icon } from "@/components/map/icons";
+import { PetrolBand } from "@/components/petrol-band";
 import { sameEvent, STAGE_LABEL, STAGES, type StageEvent } from "@/lib/stages";
 import { useAnalysisStage } from "@/lib/use-analysis-stage";
 
@@ -24,21 +25,46 @@ export function AnalysisProgress({ id, repo, branch, commit, initial, stale: sta
   const current = event.stage === null ? -1 : STAGES.indexOf(event.stage);
   const failed = event.status === "failed";
 
-  return (
-    <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 py-10">
-      <div>
-        <Link href="/" className="inline-flex items-center gap-1 text-[11px] text-muted hover:text-foreground">
-          <Icon name="arrowLeft" className="size-3" />
-          Repositories
-        </Link>
-        <h1 className="mt-2 flex items-center gap-2 font-mono text-sm font-semibold">
-          {repo}
-          {branch && <span className="rounded bg-background px-1 text-[10px] font-normal text-muted ring-1 ring-border">{branch}</span>}
-          {commit && <span className="text-[11px] font-normal text-muted">{commit.slice(0, 7)}</span>}
-        </h1>
-      </div>
+  // Said in the card's header, so the list itself only has to show which stage is which.
+  const summary =
+    event.status === "complete"
+      ? "Done"
+      : failed
+        ? "Failed"
+        : stale
+          ? "Stopped responding"
+          : event.status === "queued" || current === -1
+            ? "Queued"
+            : `${current + 1} of ${STAGES.length}`;
 
-      <ol className="rounded-xl border border-border bg-surface">
+  return (
+    <PetrolBand
+      header={
+        <>
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 text-[11px] font-medium tracking-[0.2em] text-white/80 uppercase hover:text-white"
+          >
+            <Icon name="arrowLeft" className="size-3" />
+            Repositories
+          </Link>
+          <h1 className="mt-4 truncate text-3xl leading-[1.05] font-semibold tracking-[-0.035em] text-white sm:text-4xl">{repo}</h1>
+          {(branch || commit) && (
+            <p className="mt-3 flex items-center gap-2 font-mono text-[11px] text-white/75">
+              {branch && <span className="rounded px-1.5 py-px ring-1 ring-white/30">{branch}</span>}
+              {commit && <span>{commit.slice(0, 7)}</span>}
+            </p>
+          )}
+        </>
+      }
+    >
+      <header className="flex h-9 items-center gap-2 border-b border-border bg-background px-4">
+        <h2 className="text-[11px] font-semibold">Mapping</h2>
+        <div className="flex-1" />
+        <span className={`font-mono text-[10px] tabular-nums ${failed ? "text-danger" : "text-muted"}`}>{summary}</span>
+      </header>
+
+      <ol>
         {STAGES.map((stage, i) => {
           const state =
             event.status === "complete" || i < current
@@ -65,18 +91,22 @@ export function AnalysisProgress({ id, repo, branch, commit, initial, stale: sta
       </ol>
 
       {unavailable && (
-        <p className="flex items-center gap-1.5 text-[11px] text-muted">
+        <p className="flex items-center gap-1.5 border-t border-border px-4 py-2.5 text-[11px] text-muted">
           <Icon name="alert" className="size-3.5" />
           Live updates are unavailable, so this page may be behind. Refresh to see the latest stage.
         </p>
       )}
-      {event.status === "queued" && !stale &&<p className="text-[11px] text-muted">Queued; the run has not started yet.</p>}
+      {event.status === "queued" && !stale && (
+        <p className="border-t border-border px-4 py-2.5 text-[11px] text-muted">Queued; the run has not started yet.</p>
+      )}
       {failed && current === -1 && (
-        <p className="text-[11px] text-danger">{event.message ?? "The run failed before it reached a stage."}</p>
+        <p className="border-t border-border px-4 py-2.5 text-[11px] text-danger">
+          {event.message ?? "The run failed before it reached a stage."}
+        </p>
       )}
 
       {(failed || stale) && (
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
+        <div className="flex items-center justify-between gap-3 border-t border-border bg-background px-4 py-2.5">
           <p className="text-[11px] text-muted">
             {failed
               ? "Nothing from this run was kept."
@@ -85,7 +115,7 @@ export function AnalysisProgress({ id, repo, branch, commit, initial, stale: sta
           <form action={rerunAnalysis.bind(null, id)}>
             <button
               type="submit"
-              className="flex items-center gap-1.5 rounded-md bg-background px-2.5 py-1 text-[11px] font-medium whitespace-nowrap ring-1 ring-border hover:bg-border/60"
+              className="flex h-7 items-center gap-1.5 rounded-lg bg-petrol px-3 text-[11px] font-medium whitespace-nowrap text-white hover:bg-petrol/90"
             >
               <Icon name="refresh" className="size-3" />
               Run again
@@ -93,7 +123,7 @@ export function AnalysisProgress({ id, repo, branch, commit, initial, stale: sta
           </form>
         </div>
       )}
-    </div>
+    </PetrolBand>
   );
 }
 
@@ -114,7 +144,7 @@ function StageMark({ state }: { state: "done" | "current" | "failed" | "pending"
   }
   return (
     <span
-      className={`mt-px size-4 shrink-0 rounded-full border-2 ${state === "current" ? "border-accent bg-accent/15" : "border-border"}`}
+      className={`mt-px size-4 shrink-0 rounded-full border-2 ${state === "current" ? "border-petrol bg-petrol/15" : "border-border"}`}
     />
   );
 }

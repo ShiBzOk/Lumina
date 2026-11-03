@@ -1,12 +1,13 @@
 import { SignIn } from "@clerk/nextjs";
 import { Suspense } from "react";
+import { AUTH_APPEARANCE, AuthShell } from "@/components/auth-shell";
 
 export default function SignInPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center">
+    <AuthShell>
       <Suspense>
-        <SignIn />
+        <SignIn appearance={AUTH_APPEARANCE} />
       </Suspense>
-    </div>
+    </AuthShell>
   );
 }

@@ -31,7 +31,11 @@ Roles:
 
 Answer null when no role clearly fits or the file is a test, script, fixture or anything else. A missing label is better than a wrong one. Judge only from what you are shown.`;
 
-const BATCH = 40;
+// Picking one of seven roles needs little thought, and the default effort made a
+// single batch take half a minute. Small batches so even a small repository's
+// files go out as several requests at once rather than one.
+const EFFORT = "low";
+const BATCH = 10;
 const CONCURRENCY = 4;
 const HEAD_LINES = 40;
 const HEAD_CHARS = 3000;
@@ -49,8 +53,9 @@ export function headOf(text: string): string {
 type Db = SupabaseClient<Database>;
 type Answer = ModelRole | null;
 
-// The head is cut from the file's content, so its hash stands in for it.
-const keyOf = (f: LabelInput) => cacheKey({ prompt: PROMPT, path: f.path, sha256: f.sha256, imports: f.imports, externals: f.externals });
+// The head is cut from the file's content, so its hash stands in for it. The
+// effort changes the answer, so it is part of the key like the prompt is.
+const keyOf = (f: LabelInput) => cacheKey({ prompt: PROMPT, effort: EFFORT, path: f.path, sha256: f.sha256, imports: f.imports, externals: f.externals });
 
 function batchLabeller(db: Db, orgId: string) {
   return cachedBatch<LabelInput, Answer>("label files", {
@@ -66,6 +71,7 @@ function batchLabeller(db: Db, orgId: string) {
       const ids = misses.map((_, i) => `f${i}`);
       const completion = await ai.chat.completions.create({
         model: MODEL,
+        reasoning_effort: EFFORT,
         messages: [
           { role: "developer", content: PROMPT },
           {
