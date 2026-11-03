@@ -14,7 +14,9 @@
   "dependencies": {
     "@clerk/nextjs": "^7.9.23",
     "@supabase/supabase-js": "^2.118.0",
+    "langsmith": "^0.11.6",
     "next": "16.4.3",
+    "openai": "^7.47.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "tar": "^7.5.22",

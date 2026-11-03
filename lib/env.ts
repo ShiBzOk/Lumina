@@ -12,6 +12,7 @@ const required = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   "SUPABASE_SERVICE_ROLE_KEY",
+  "OPENAI_API_KEY",
 ] as const;
 
 type EnvKey = (typeof required)[number];
@@ -35,4 +36,8 @@ export const env = {
   supabasePublishableKey: get("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
   // Server only: the pipeline writer. Not NEXT_PUBLIC_, so it never reaches a bundle.
   supabaseSecretKey: get("SUPABASE_SERVICE_ROLE_KEY"),
+  openaiKey: get("OPENAI_API_KEY"),
+  // Optional on purpose: calls work without it. It is reported in the pane,
+  // because a missing key otherwise looks exactly like no traffic.
+  tracing: process.env.LANGSMITH_TRACING?.trim() === "true" && Boolean(process.env.LANGSMITH_API_KEY?.trim()),
 };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
-import type { Framework } from "@/lib/map/frameworks";
+import { MODEL_CATEGORIES, type Framework, type ModelRole } from "@/lib/map/frameworks";
 import { walk, DEFAULT_DEPTH, DEPTHS, type Adjacency, type WalkDirection } from "@/lib/map/graph";
 import { sameSelection, type Selection } from "@/lib/map/highlight";
 import { INSIGHT_SENTENCES, type Insights } from "@/lib/map/insights";
@@ -9,6 +9,7 @@ import { fileTypeOf, type MapNode, type RepoMap } from "@/lib/map/model";
 import { countTypes, type RepoSummary } from "@/lib/map/summary";
 import type { ImportRecord, RepoFile, Route, WithheldRoute } from "@/parser/types";
 import { TYPE_COLOR } from "./colors";
+import { Explanation, explainKey, type ExplainState } from "./explanation";
 import { Icon, type IconName } from "./icons";
 
 export type PaneTab = "structure" | "explanation";
@@ -17,6 +18,7 @@ export type PaneTab = "structure" | "explanation";
 const LIST_LIMIT = 8;
 
 interface DetailPaneProps {
+  analysisId: string;
   map: RepoMap;
   repo: string;
   /** The framework the adapter recognised, or null under the fallback. */
@@ -27,6 +29,13 @@ interface DetailPaneProps {
   selection: Selection;
   hovered: Selection;
   files: ReadonlyMap<string, RepoFile>;
+  /** The model's labels for files convention left without a role. */
+  modelRoles: ReadonlyMap<string, ModelRole>;
+  /** Explanations fetched so far, by subject; they stay when the selection moves. */
+  explanations: ReadonlyMap<string, ExplainState>;
+  onExplain: (subject: NonNullable<Selection>) => void;
+  model: string;
+  tracing: boolean;
   importsOf: ReadonlyMap<string, readonly ImportRecord[]>;
   graph: Adjacency;
   insights: Insights;
@@ -42,10 +51,14 @@ interface DetailPaneProps {
 // Everything here is already in the browser: selecting something re-reads
 // props, it never asks the server for anything.
 export function DetailPane(props: DetailPaneProps) {
-  const { map, selection, tab, onTab, onCollapse } = props;
+  const { map, selection, tab, onTab, onCollapse, graph, files, hovered, onSelect, onHover } = props;
   const node = selection?.kind === "node" ? map.nodes.find((n) => n.id === selection.id) : undefined;
   const path = selection?.kind === "file" ? selection.path : null;
   const subject = path !== null ? "file" : node ? "folder" : "repository";
+  const target: Selection = path !== null ? { kind: "file", path } : node ? { kind: "node", id: node.id } : null;
+  // What the prose may link to: real files, and folders that are boxes on the map.
+  const filePaths = useMemo(() => new Set(files.keys()), [files]);
+  const folderIds = useMemo(() => new Set(map.nodes.map((n) => n.id)), [map]);
 
   return (
     <aside className="flex w-[19rem] shrink-0 flex-col border-l border-border bg-surface">
@@ -63,7 +76,29 @@ export function DetailPane(props: DetailPaneProps) {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === "explanation" ? (
-          <Empty icon="network" title="No explanation yet" body={`Nothing has been written about this ${subject}.`} />
+          target ? (
+            <Explanation
+              analysisId={props.analysisId}
+              subject={target}
+              context={
+                target.kind === "file"
+                  ? `The model is handed its source, the ${graph.out.get(target.path)?.length ?? 0} files it imports and the ${graph.in.get(target.path)?.length ?? 0} files importing it, as the parser found them.`
+                  : `The model is handed this folder's ${node?.files.length ?? 0} files and the imports into and out of it, as the parser found them.`
+              }
+              unexplainable={target.kind === "file" && files.get(target.path)?.kind === "asset" ? "Assets aren't parsed, so there is nothing to explain from." : null}
+              state={props.explanations.get(explainKey(target))}
+              model={props.model}
+              tracing={props.tracing}
+              onExplain={() => props.onExplain(target)}
+              files={filePaths}
+              folders={folderIds}
+              hovered={hovered}
+              onSelect={onSelect}
+              onHover={onHover}
+            />
+          ) : (
+            <Empty icon="network" title="Nothing to explain yet" body={`Select a file or a folder on the map to explain it. The ${subject} as a whole isn't explained.`} />
+          )
         ) : path !== null ? (
           <FileStructure {...props} path={path} />
         ) : node ? (
@@ -326,6 +361,7 @@ function RepoStructure({
   routes,
   routesWithheld,
   summary,
+  modelRoles,
   insights,
   insightsOpen,
   onInsightsOpen,
@@ -388,7 +424,13 @@ function RepoStructure({
         <span className="font-mono font-semibold tabular-nums">{summary.unidentified}</span>
         <span className="text-muted"> of {summary.files} files</span>
       </p>
-      {noAdapter && <p className="mt-0.5 text-[10.5px] text-muted">No framework adapter applied, so no file has a role.</p>}
+      {noAdapter && <p className="mt-0.5 text-[10.5px] text-muted">No framework adapter applied, so no file has a role from convention.</p>}
+      {modelRoles.size > 0 && (
+        <p className="mt-0.5 text-[10.5px] text-muted">
+          <span className="font-mono text-foreground tabular-nums">{modelRoles.size}</span> of them labelled by the model, never as a page,
+          route or controller.
+        </p>
+      )}
 
       {/* Last, and shut until asked: this explains a codebase, it doesn't grade one. */}
       <button
@@ -478,6 +520,7 @@ function FileStructure({
   framework,
   path,
   files,
+  modelRoles,
   importsOf,
   graph,
   hovered,
@@ -486,6 +529,7 @@ function FileStructure({
 }: DetailPaneProps & { path: string }) {
   const nodeId = map.nodeOf.get(path);
   const file = files.get(path);
+  const modelRole = modelRoles.get(path);
   const records = importsOf.get(path) ?? [];
   const unresolved = records.filter((r) => r.resolution.status === "unresolved");
   const external = new Set(records.flatMap((r) => (r.resolution.status === "external" ? [r.specifier] : [])));
@@ -504,11 +548,12 @@ function FileStructure({
 
       <div className="mt-2">
         <Fact label="Kind">
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex flex-wrap items-center gap-x-1.5">
             <span className="size-1.5 rounded-full" style={{ background: TYPE_COLOR[fileTypeOf(path)] }} aria-hidden />
             <span className="font-mono">{ext}</span>
             <span className="text-muted">· {file?.kind === "asset" ? "asset, not parsed" : "parsed source"}</span>
             {file?.role && <span className="text-muted">· {framework?.categories.find((c) => c.role === file.role)?.label ?? file.role}</span>}
+            {modelRole && <span className="text-muted">· {MODEL_CATEGORIES.find((c) => c.role === modelRole)?.label}, labelled by the model</span>}
           </span>
         </Fact>
         <Fact label="Length">

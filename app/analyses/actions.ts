@@ -3,11 +3,15 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
-import { getAnalysis } from "@/lib/analyses";
-import { parseRepoInput } from "@/lib/pipeline/github";
+import { createHash } from "node:crypto";
+import { MODEL } from "@/lib/ai/client";
+import { aggregate, explainFile, explainFolder, type FolderFile } from "@/lib/ai/explain";
+import { getAnalysis, loadGraph } from "@/lib/analyses";
+import { fold } from "@/lib/map/fold";
+import { fileAt, headCommit, parseRepoInput, type RepoRef } from "@/lib/pipeline/github";
 import { runAnalysis } from "@/lib/pipeline/run";
 import { STALE_AFTER_MS } from "@/lib/stages";
-import { createWriterSupabase } from "@/lib/supabase";
+import { createServerSupabase, createWriterSupabase } from "@/lib/supabase";
 
 export interface SubmitState {
   error: string | null;
@@ -136,4 +140,108 @@ export async function rerunAnalysis(analysisId: string): Promise<void> {
     );
   }
   redirect(`/analyses/${analysis.id}`);
+}
+
+export type ExplainSubject = { kind: "file"; path: string } | { kind: "node"; id: string };
+
+/** Whether what was analysed is still what the repository holds. */
+export type Freshness =
+  | { state: "current" }
+  /** The branch moved on, but this file (when it is one) is unchanged. */
+  | { state: "moved"; head: string }
+  | { state: "changed"; head: string; deleted: boolean }
+  /** The check itself couldn't run; said rather than assumed either way. */
+  | { state: "unknown"; reason: string };
+
+export type ExplainResult =
+  | { ok: true; body: string; cached: boolean; model: string; commit: string; branch: string; freshness: Freshness }
+  | { ok: false; error: string };
+
+/**
+ * Explains a file or a folded folder from the stored graph. The browser names
+ * only the subject; every neighbour handed to the model is read back from the
+ * rows the parser wrote, as the member asking.
+ */
+export async function explain(analysisId: string, subject: ExplainSubject): Promise<ExplainResult> {
+  try {
+    const { orgId } = await organization();
+    const analysis = await getAnalysis(analysisId);
+    if (!analysis || !analysis.project) return { ok: false, error: "No such analysis" };
+    if (analysis.status !== "complete" || !analysis.commit_sha || !analysis.branch) {
+      return { ok: false, error: "The analysis isn't complete, so there is nothing to explain yet" };
+    }
+    const repo = { owner: analysis.project.repo_owner, name: analysis.project.repo_name };
+    const { commit_sha: commit, branch } = analysis;
+    const graph = await loadGraph(analysis);
+    const dbs = { reader: createServerSupabase(), writer: createWriterSupabase(), orgId };
+    const labelOf = new Map(graph.labels.map((l) => [l.path, l.role]));
+
+    if (subject.kind === "file") {
+      const file = graph.files.find((f) => f.path === subject.path);
+      if (!file) return { ok: false, error: `${subject.path} is not in this analysis` };
+      if (file.kind === "asset") return { ok: false, error: "Assets aren't parsed, so there is nothing to explain from." };
+      const externals = new Set(
+        graph.imports.flatMap((r) => (r.from === file.path && r.resolution.status === "external" ? [r.specifier] : [])),
+      );
+      const [result, freshness] = await Promise.all([
+        explainFile(dbs, {
+          repo,
+          commit,
+          path: file.path,
+          sha256: file.sha256,
+          role: file.role ?? labelOf.get(file.path) ?? null,
+          imports: graph.edges.filter((e) => e.from === file.path).map((e) => e.to),
+          importedBy: graph.edges.filter((e) => e.to === file.path).map((e) => e.from),
+          externals: [...externals].sort(),
+        }),
+        checkFreshness(repo, branch, commit, file),
+      ]);
+      return { ok: true, body: result.value, cached: result.cached, model: MODEL, commit, branch, freshness };
+    }
+
+    // The same folding the map draws, over the same rows, so the folder asked about is the box clicked.
+    const { nodes, nodeOf } = fold(graph.files);
+    const node = nodes.find((n) => n.id === subject.id);
+    if (!node) return { ok: false, error: `${subject.id} is not a folder on this map` };
+    const inside = new Set(node.files);
+    const importedFrom = new Map<string, { folder: string; count: number }[]>();
+    const importsFrom: { folder: string; count: number }[] = [];
+    let internal = 0;
+    for (const e of graph.edges) {
+      const from = inside.has(e.from);
+      const to = inside.has(e.to);
+      if (from && to) internal += 1;
+      else if (to) importedFrom.set(e.to, [...(importedFrom.get(e.to) ?? []), { folder: nodeOf.get(e.from) ?? ".", count: 1 }]);
+      else if (from) importsFrom.push({ folder: nodeOf.get(e.to) ?? ".", count: 1 });
+    }
+    const byPath = new Map(graph.files.map((f) => [f.path, f]));
+    const files: FolderFile[] = node.files.flatMap((p) => {
+      const f = byPath.get(p);
+      return f
+        ? [{ path: p, sha256: f.sha256, role: f.role ?? labelOf.get(p) ?? null, lines: f.lines, fanIn: f.fanIn, fanOut: f.fanOut, importedFrom: aggregate(importedFrom.get(p) ?? []) }]
+        : [];
+    });
+    const [result, freshness] = await Promise.all([
+      explainFolder(dbs, { repo, folder: node.id, files, importsFrom: aggregate(importsFrom), internal }),
+      checkFreshness(repo, branch, commit, null),
+    ]);
+    return { ok: true, body: result.value, cached: result.cached, model: MODEL, commit, branch, freshness };
+  } catch (error) {
+    // Returned rather than thrown: a thrown message is hidden in production, and this one is the user's to read.
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function checkFreshness(repo: RepoRef, branch: string, commit: string, file: { path: string; sha256: string } | null): Promise<Freshness> {
+  try {
+    const head = await headCommit(repo, branch);
+    if (file) {
+      const bytes = head === commit ? null : await fileAt(repo, head, file.path);
+      if (head !== commit && bytes === null) return { state: "changed", head, deleted: true };
+      if (bytes !== null && createHash("sha256").update(bytes).digest("hex") !== file.sha256) return { state: "changed", head, deleted: false };
+    }
+    return head === commit ? { state: "current" } : { state: "moved", head };
+  } catch (error) {
+    return { state: "unknown", reason: error instanceof Error ? error.message : String(error) };
+  }
 }

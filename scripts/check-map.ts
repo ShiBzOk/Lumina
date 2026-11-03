@@ -15,14 +15,14 @@ if (!process.argv[2]) {
 }
 const file = path.resolve(process.argv[2]);
 const result = readParseResult(file);
-const map = buildMap(result.files, result.edges);
+const map = buildMap(result.files, result.edges, new Map());
 
 const sizes = map.nodes.map((n) => n.files.length);
 const singles = map.nodes.filter((n) => n.files.length < 2);
 const rows = new Set(map.nodes.flatMap((n) => n.files.map((f) => f.path)));
 const dangling = result.edges.filter((e) => !rows.has(e.from) || !rows.has(e.to));
 const unplaced = map.nodes.filter((n) => !map.positions.has(n.id));
-const again = buildMap(result.files, result.edges);
+const again = buildMap(result.files, result.edges, new Map());
 const deterministic = JSON.stringify([...map.positions]) === JSON.stringify([...again.positions]);
 
 console.log(`${result.files.length} files, ${result.edges.length} edges, folded at threshold ${map.threshold}\n`);

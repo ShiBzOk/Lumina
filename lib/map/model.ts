@@ -3,6 +3,7 @@
 
 import type { Edge, RepoFile } from "../../parser/types.ts";
 import { fold, shortestUniqueLabels } from "./fold.ts";
+import type { ModelRole } from "./frameworks.ts";
 import { layout, type Point } from "./layout.ts";
 
 /** What sort of file this is, by extension. Each one is a colour on the map. */
@@ -54,6 +55,8 @@ export interface FileRow {
   area: string;
   /** What the framework adapter says this file is, or null. */
   role: string | null;
+  /** The model's label for a file the adapter left without a role. Never structural. */
+  modelRole: ModelRole | null;
   fanIn: number;
   fanOut: number;
 }
@@ -80,7 +83,7 @@ export interface RepoMap {
   positions: Map<string, Point>;
 }
 
-export function buildMap(files: readonly RepoFile[], edges: readonly Edge[]): RepoMap {
+export function buildMap(files: readonly RepoFile[], edges: readonly Edge[], modelRoles: ReadonlyMap<string, ModelRole>): RepoMap {
   const folded = fold(files);
   const labels = shortestUniqueLabels(folded.nodes.map((n) => n.id));
   const byPath = new Map(files.map((f) => [f.path, f]));
@@ -98,6 +101,7 @@ export function buildMap(files: readonly RepoFile[], edges: readonly Edge[]): Re
           type: fileTypeOf(path),
           area: areaOf(path),
           role: f.role,
+          modelRole: modelRoles.get(path) ?? null,
           fanIn: f.fanIn,
           fanOut: f.fanOut,
         },

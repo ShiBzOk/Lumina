@@ -69,6 +69,31 @@ export async function resolveCommit(repo: RepoRef, branch: string | null): Promi
   return { branch: ref, sha, description: typeof description === "string" && description.trim() ? description.trim() : null };
 }
 
+/** The commit `branch` points at now. One API request. */
+export async function headCommit(repo: RepoRef, branch: string): Promise<string> {
+  const slug = `${repo.owner}/${repo.name}`;
+  const res = await github(`/repos/${slug}/commits/${encodeURIComponent(branch)}`, `${slug} has no branch named "${branch}" any more`, {
+    Accept: "application/vnd.github.sha",
+  });
+  const sha = (await res.text()).trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`GitHub returned "${sha.slice(0, 60)}" instead of a commit for ${slug}@${branch}`);
+  return sha;
+}
+
+/**
+ * One file's bytes at `ref`, or null when the file doesn't exist there. Served
+ * from GitHub's raw host, which the 60-an-hour API limit doesn't cover.
+ */
+export async function fileAt(repo: RepoRef, ref: string, file: string): Promise<Buffer | null> {
+  const encoded = file.split("/").map(encodeURIComponent).join("/");
+  const res = await fetch(`https://raw.githubusercontent.com/${repo.owner}/${repo.name}/${encodeURIComponent(ref)}/${encoded}`, {
+    headers: { "User-Agent": "lumina" },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GitHub answered HTTP ${res.status} for ${file}@${ref.slice(0, 12)}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 /** Downloads the archive of exactly `sha`, so what is parsed is the commit recorded. */
 export async function downloadArchive(repo: RepoRef, sha: string, file: string): Promise<number> {
   const res = await fetch(`https://codeload.github.com/${repo.owner}/${repo.name}/tar.gz/${sha}`, {

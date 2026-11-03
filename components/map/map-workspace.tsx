@@ -1,9 +1,10 @@
 "use client";
 
-import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { frameworkOf } from "@/lib/map/frameworks";
+import { AccountButton } from "@/components/account-button";
+import { explain } from "@/app/analyses/actions";
+import { frameworkOf, MODEL_CATEGORIES, type ModelRole } from "@/lib/map/frameworks";
 import { highlight, isFiltering, matches, NO_FILTER, sameSelection, type Filter, type Selection } from "@/lib/map/highlight";
 import { adjacency } from "@/lib/map/graph";
 import { findInsights } from "@/lib/map/insights";
@@ -14,11 +15,12 @@ import { Canvas, type CanvasHandle } from "./canvas";
 import { CategoryRail } from "./category-rail";
 import { CoverageBanner } from "./coverage-banner";
 import { DetailPane, type PaneTab } from "./detail-pane";
+import { explainKey, type ExplainState } from "./explanation";
 import { Icon } from "./icons";
 import { FileSearch } from "./file-search";
 
 interface MapWorkspaceProps {
-  meta: { repo: string; branch: string; commit: string };
+  meta: { analysisId: string; repo: string; branch: string; commit: string };
   adapter: string;
   files: RepoFile[];
   edges: Edge[];
@@ -26,12 +28,17 @@ interface MapWorkspaceProps {
   routes: Route[];
   routesWithheld: WithheldRoute[];
   coverage: Coverage;
+  labels: { path: string; role: ModelRole }[];
+  /** The pinned model, shown before anything is asked of it. */
+  model: string;
+  tracing: boolean;
 }
 
 // The shell: header across the top, categories on the left, the canvas in the
 // middle, details on the right. Later phases add to these panels, not move them.
-export function MapWorkspace({ meta, adapter, files, edges, imports, routes, routesWithheld, coverage }: MapWorkspaceProps) {
-  const map = useMemo(() => buildMap(files, edges), [files, edges]);
+export function MapWorkspace({ meta, adapter, files, edges, imports, routes, routesWithheld, coverage, labels, model, tracing }: MapWorkspaceProps) {
+  const modelRoles = useMemo(() => new Map(labels.map((l) => [l.path, l.role])), [labels]);
+  const map = useMemo(() => buildMap(files, edges, modelRoles), [files, edges, modelRoles]);
   const [selection, setSelection] = useState<Selection>(null);
   // What the pointer is over, on the map or in the pane; each lights it in the other.
   const [hovered, setHovered] = useState<Selection>(null);
@@ -42,6 +49,22 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
   // Lives here so it stays shut until asked, however often the pane redraws.
   const [insightsOpen, setInsightsOpen] = useState(false);
   const canvas = useRef<CanvasHandle>(null);
+  // Every explanation fetched this visit, by subject, so coming back to one shows it without asking again.
+  const [explanations, setExplanations] = useState<ReadonlyMap<string, ExplainState>>(new Map());
+  const runExplain = useCallback(
+    async (subject: NonNullable<Selection>) => {
+      const key = explainKey(subject);
+      const set = (state: ExplainState) => setExplanations((prev) => new Map(prev).set(key, state));
+      set({ status: "loading" });
+      try {
+        const result = await explain(meta.analysisId, subject);
+        set(result.ok ? { status: "done", ...result } : { status: "error", message: result.error });
+      } catch (error) {
+        set({ status: "error", message: error instanceof Error ? error.message : "The request failed" });
+      }
+    },
+    [meta.analysisId],
+  );
 
   const lit = useMemo(() => highlight(map, selection), [map, selection]);
   const summary = useMemo(() => summarize(files, imports), [files, imports]);
@@ -72,6 +95,11 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
     for (const f of files) if (f.role !== null) counts.set(f.role, (counts.get(f.role) ?? 0) + 1);
     return counts;
   }, [files]);
+  const modelRoleCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const l of labels) counts.set(l.role, (counts.get(l.role) ?? 0) + 1);
+    return counts;
+  }, [labels]);
   const filtering = isFiltering(filter);
   const matchingCount = useMemo(
     () => (filtering ? map.nodes.reduce((n, node) => n + node.files.filter((f) => matches(f, filter)).length, 0) : files.length),
@@ -98,6 +126,7 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
 
   const filterName = [
     framework?.categories.find((c) => c.role === filter.role)?.label,
+    MODEL_CATEGORIES.find((c) => c.role === filter.modelRole)?.label,
     filter.area,
     filter.hiddenTypes.size > 0 ? `${filter.hiddenTypes.size} type${filter.hiddenTypes.size > 1 ? "s" : ""} hidden` : null,
   ]
@@ -135,7 +164,7 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
         >
           <Icon name="sliders" className="size-4" />
         </button>
-        <UserButton />
+        <AccountButton />
       </header>
 
       <CoverageBanner coverage={coverage} />
@@ -148,6 +177,7 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
             areas={areas}
             framework={framework}
             roleCounts={roleCounts}
+            modelRoleCounts={modelRoleCounts}
             types={types}
             filter={filter}
             onFilter={setFilter}
@@ -217,6 +247,7 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
 
         {paneOpen && (
           <DetailPane
+            analysisId={meta.analysisId}
             map={map}
             repo={meta.repo}
             framework={framework}
@@ -226,6 +257,11 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
             selection={selection}
             hovered={hovered}
             files={byPath}
+            modelRoles={modelRoles}
+            explanations={explanations}
+            onExplain={runExplain}
+            model={model}
+            tracing={tracing}
             importsOf={importsOf}
             graph={graph}
             insights={insights}

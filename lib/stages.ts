@@ -13,6 +13,7 @@ export const STAGE_LABEL: Record<AnalysisStage, string> = {
   selecting: "Selecting files",
   parsing: "Parsing imports",
   storing: "Storing the graph",
+  labelling: "Labelling unidentified files",
 };
 
 // Nothing here has a queue or a timeout, so a process that died mid-run leaves

@@ -55,24 +55,27 @@ export function highlight(map: RepoMap, selection: Selection): Highlight | null 
   return { edges, files, nodes, handles };
 }
 
-export const NO_FILTER: Filter = { area: null, role: null, hiddenTypes: new Set() };
+export const NO_FILTER: Filter = { area: null, role: null, modelRole: null, hiddenTypes: new Set() };
 
 export interface Filter {
   /** Top-level directory, or null for every file. */
   area: string | null;
   /** A framework role from the rail, or null for every file. */
   role: string | null;
+  /** A role the model labelled, or null. Apart from `role`, because the two aren't equally certain. */
+  modelRole: string | null;
   hiddenTypes: ReadonlySet<FileType>;
 }
 
 export function isFiltering(filter: Filter): boolean {
-  return filter.area !== null || filter.role !== null || filter.hiddenTypes.size > 0;
+  return filter.area !== null || filter.role !== null || filter.modelRole !== null || filter.hiddenTypes.size > 0;
 }
 
-export function matches(row: Pick<FileRow, "area" | "type" | "role">, filter: Filter): boolean {
+export function matches(row: Pick<FileRow, "area" | "type" | "role" | "modelRole">, filter: Filter): boolean {
   return (
     (filter.area === null || row.area === filter.area) &&
     (filter.role === null || row.role === filter.role) &&
+    (filter.modelRole === null || row.modelRole === filter.modelRole) &&
     !filter.hiddenTypes.has(row.type)
   );
 }

@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { AnalysisProgress } from "@/components/analysis/progress";
 import { MapWorkspace } from "@/components/map/map-workspace";
 import { WorkspaceHeader } from "@/components/workspace-header";
+import { MODEL, tracing } from "@/lib/ai/client";
 import { getAnalysis, loadGraph } from "@/lib/analyses";
 
 export const metadata: Metadata = { title: "Analysis · Lumina" };
@@ -20,11 +21,11 @@ async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["param
     if (!analysis.branch || !analysis.commit_sha || !analysis.adapter) {
       throw new Error(`Analysis ${analysis.id} is complete but has no branch, commit or adapter recorded`);
     }
-    const { files, edges, imports, routes, routesWithheld, coverage } = await loadGraph(analysis);
+    const { files, edges, imports, routes, routesWithheld, coverage, labels } = await loadGraph(analysis);
     // Only what the browser needs crosses over; everything the panes show is derived from these.
     return (
       <MapWorkspace
-        meta={{ repo, branch: analysis.branch, commit: analysis.commit_sha }}
+        meta={{ analysisId: analysis.id, repo, branch: analysis.branch, commit: analysis.commit_sha }}
         adapter={analysis.adapter}
         files={files}
         edges={edges}
@@ -32,6 +33,9 @@ async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["param
         routes={routes}
         routesWithheld={routesWithheld}
         coverage={coverage}
+        labels={labels}
+        model={MODEL}
+        tracing={tracing}
       />
     );
   }

@@ -23,7 +23,7 @@ export async function storeResult(
   target: StoreTarget,
   result: ParseResult,
   progress: (message: string) => Promise<void>,
-): Promise<void> {
+): Promise<Map<string, string>> {
   const { analysisId, orgId, attempt } = target;
   const base = { org_id: orgId, analysis_id: analysisId };
 
@@ -107,6 +107,8 @@ export async function storeResult(
     );
     if (error) throw new Error(`Could not store imports: ${error.message}`);
   });
+  // Path → file id, for anything written about these files afterwards.
+  return idOf;
 }
 
 async function inChunks<T>(

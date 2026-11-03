@@ -69,7 +69,24 @@ export const EXPRESS_CATEGORIES = [
   { role: "config", label: "Config", entry: false },
 ] as const satisfies readonly RoleCategory[];
 
-export type ReactRole = (typeof REACT_CATEGORIES)[number]["role"];
+// What the model may call a file no adapter identified. None of these is an
+// entry: page, route and controller decide the route table and which files
+// are reached without an import, and convention alone owns those. The
+// database refuses any other value from the model.
+export const MODEL_CATEGORIES = [
+  { role: "component", label: "Components", entry: false },
+  { role: "hook", label: "Hooks", entry: false },
+  { role: "service", label: "Services", entry: false },
+  { role: "repository", label: "Repositories", entry: false },
+  { role: "model", label: "Models", entry: false },
+  { role: "util", label: "Utilities", entry: false },
+  { role: "config", label: "Config", entry: false },
+] as const satisfies readonly RoleCategory[];
+
+export type ModelRole = (typeof MODEL_CATEGORIES)[number]["role"];
+export const MODEL_ROLES: readonly ModelRole[] = MODEL_CATEGORIES.map((c) => c.role);
+
+export type ReactRole =(typeof REACT_CATEGORIES)[number]["role"];
 export type NextjsRole = (typeof NEXTJS_CATEGORIES)[number]["role"];
 export type NestjsRole = (typeof NESTJS_CATEGORIES)[number]["role"];
 export type ExpressRole = (typeof EXPRESS_CATEGORIES)[number]["role"];

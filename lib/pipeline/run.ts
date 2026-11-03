@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { TablesUpdate } from "@/lib/database.types";
+import { headOf, labelFiles, type LabelInput } from "@/lib/ai/label";
 import { createWriterSupabase } from "@/lib/supabase";
 import { formatCount, type AnalysisStage } from "@/lib/stages";
 import { readParseResult } from "@/parser/io";
@@ -102,7 +103,23 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
       "storing",
       `Storing ${formatCount(result.files.length)} files, ${formatCount(result.edges.length)} edges, ${formatCount(result.imports.length)} imports`,
     );
-    await storeResult(db, { analysisId, orgId, attempt }, result, (message) => update({ stage_message: message }));
+    const idOf = await storeResult(db, { analysisId, orgId, attempt }, result, (message) => update({ stage_message: message }));
+
+    // Only source files convention said nothing about. Assets have no text to read.
+    const unidentified = await labelInputs(dir, result);
+    await enter("labelling", `Labelling ${formatCount(unidentified.length)} files no convention identified`);
+    const labels = await labelFiles(db, orgId, unidentified, (done, cached) =>
+      update({ stage_message: `Labelled ${formatCount(done)} of ${formatCount(unidentified.length)} files (${formatCount(cached)} from cache)` }),
+    );
+    const rows = [...labels].map(([path, role]) => {
+      const fileId = idOf.get(path);
+      if (!fileId) throw new Error(`A label names ${path}, which was not stored`);
+      return { org_id: orgId, file_id: fileId, role, source: "model" };
+    });
+    for (let i = 0; i < rows.length; i += 1000) {
+      const { error } = await db.from("file_roles").insert(rows.slice(i, i + 1000));
+      if (error) throw new Error(`Could not store labels: ${error.message}`);
+    }
 
     await update({
       status: "complete",
@@ -134,6 +151,28 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
   }
 }
 
+// What the labeller is shown for each file: read from the extracted copy,
+// which is exactly the commit that was parsed.
+async function labelInputs(dir: string, result: ParseResult): Promise<LabelInput[]> {
+  const imports = Map.groupBy(result.edges, (e) => e.from);
+  const externals = Map.groupBy(
+    result.imports.filter((r) => r.resolution.status === "external"),
+    (r) => r.from,
+  );
+  const inputs: LabelInput[] = [];
+  // One at a time: a large repository would otherwise open every file at once.
+  for (const f of result.files) {
+    if (f.kind !== "source" || f.role !== null) continue;
+    inputs.push({
+      path: f.path,
+      sha256: f.sha256,
+      head: headOf(await fs.readFile(path.join(dir, f.path), "utf8")),
+      imports: (imports.get(f.path) ?? []).map((e) => e.to),
+      externals: [...new Set((externals.get(f.path) ?? []).map((r) => r.specifier))].sort(),
+    });
+  }
+  return inputs;
+}
 
 // Names what the repository does hold, from the files actually extracted.
 function noSourceFiles(extensions: Map<string, number>): string {

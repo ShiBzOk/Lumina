@@ -157,36 +157,29 @@ export type Database = {
       explanations: {
         Row: {
           body: string
-          content_hash: string
           created_at: string
-          file_id: string
           id: string
+          key: string
+          model: string
           org_id: string
         }
         Insert: {
           body: string
-          content_hash: string
           created_at?: string
-          file_id: string
           id?: string
+          key: string
+          model: string
           org_id: string
         }
         Update: {
           body?: string
-          content_hash?: string
           created_at?: string
-          file_id?: string
           id?: string
+          key?: string
+          model?: string
           org_id?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "explanations_file_id_org_id_fkey"
-            columns: ["file_id", "org_id"]
-            isOneToOne: false
-            referencedRelation: "files"
-            referencedColumns: ["id", "org_id"]
-          },
           {
             foreignKeyName: "explanations_org_id_fkey"
             columns: ["org_id"]
@@ -457,6 +450,41 @@ export type Database = {
           },
         ]
       }
+      role_labels: {
+        Row: {
+          created_at: string
+          id: string
+          key: string
+          model: string
+          org_id: string
+          role: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          key: string
+          model: string
+          org_id: string
+          role?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          key?: string
+          model?: string
+          org_id?: string
+          role?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "role_labels_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       routes: {
         Row: {
           analysis_id: string
@@ -517,7 +545,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      analysis_stage: "fetching" | "selecting" | "parsing" | "storing"
+      analysis_stage: "fetching" | "selecting" | "parsing" | "storing" | "labelling"
       analysis_status: "queued" | "running" | "complete" | "failed"
     }
     CompositeTypes: {
@@ -646,7 +674,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      analysis_stage: ["fetching", "selecting", "parsing", "storing"],
+      analysis_stage: ["fetching", "selecting", "parsing", "storing", "labelling"],
       analysis_status: ["queued", "running", "complete", "failed"],
     },
   },

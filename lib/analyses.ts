@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { MODEL_ROLES, type ModelRole } from "@/lib/map/frameworks";
 import { createServerSupabase } from "@/lib/supabase";
 import { isStale } from "@/lib/stages";
 import { readCoverage, readRoutesWithheld } from "@/parser/io";
@@ -73,6 +74,8 @@ export interface StoredGraph {
   routes: Route[];
   routesWithheld: WithheldRoute[];
   coverage: Coverage;
+  /** The model's roles for files convention didn't identify. Kept apart from adapter roles, which carry structure. */
+  labels: { path: string; role: ModelRole }[];
 }
 
 // PostgREST returns at most 1000 rows per request. The first page also brings
@@ -116,7 +119,7 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
     readAll("file roles", (from, to, c) =>
       supabase
         .from("file_roles")
-        .select("file_id, role, file:files!inner(analysis_id)", { count: count(c) })
+        .select("file_id, role, source, file:files!inner(analysis_id)", { count: count(c) })
         .eq("file.analysis_id", id)
         .order("id")
         .range(from, to),
@@ -147,7 +150,10 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
     ),
   ]);
 
-  const roleOf = new Map(roleRows.map((r) => [r.file_id, r.role]));
+  const roleOf = new Map<string, string>();
+  for (const r of roleRows) {
+    if (member(r.source, ["adapter", "model"] as const, "file_roles.source") === "adapter") roleOf.set(r.file_id, r.role);
+  }
   const pathOf = new Map(fileRows.map((f) => [f.id, f.path]));
   const path = (fileId: string, at: string) => {
     const p = pathOf.get(fileId);
@@ -193,11 +199,17 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
     .map((r) => ({ file: path(r.file_id, "routes.file_id"), line: r.line, method: r.method, pattern: r.pattern }))
     .sort((a, b) => compare(a.pattern, b.pattern) || compare(a.method, b.method) || compare(a.file, b.file));
 
+  const labels = roleRows
+    .filter((r) => r.source === "model")
+    .map((r) => ({ path: path(r.file_id, "file_roles.file_id"), role: member(r.role, MODEL_ROLES, "file_roles.role") }))
+    .sort((a, b) => compare(a.path, b.path));
+
   return {
     files,
     edges,
     imports,
     routes,
+    labels,
     routesWithheld: readRoutesWithheld(analysis.routes_withheld),
     coverage: readCoverage(analysis.coverage),
   };

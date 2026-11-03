@@ -1,5 +1,6 @@
-import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
+import { OrganizationSwitcher } from "@clerk/nextjs";
 import Link from "next/link";
+import { AccountButton } from "@/components/account-button";
 
 // The top bar of every signed-in screen except the map, which has its own.
 export function WorkspaceHeader() {
@@ -14,7 +15,7 @@ export function WorkspaceHeader() {
       {/* Switching, creating and inviting all come from Clerk's own UI. */}
       <OrganizationSwitcher hidePersonal afterSelectOrganizationUrl="/" afterCreateOrganizationUrl="/" afterLeaveOrganizationUrl="/" />
       <div className="flex-1" />
-      <UserButton />
+      <AccountButton />
     </header>
   );
 }
