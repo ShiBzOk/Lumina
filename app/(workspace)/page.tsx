@@ -2,8 +2,9 @@ import { Suspense } from "react";
 import { RepositoryBrowser, type RepositoryRow } from "@/components/dashboard/repository-browser";
 import { listAnalyses } from "@/lib/analyses";
 
-async function Repositories() {
-  const analyses = await listAnalyses();
+async function Repositories({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
+  // `/?add` arrives from the map's repository menu, asking for the form straight away.
+  const [analyses, params] = await Promise.all([listAnalyses(), searchParams]);
   const rows: RepositoryRow[] = analyses.map((a) => ({
     id: a.id,
     repo: a.project ? `${a.project.repo_owner}/${a.project.repo_name}` : "(unknown repository)",
@@ -16,20 +17,20 @@ async function Repositories() {
     packages: a.package_count,
     stale: a.stale,
   }));
-  return <RepositoryBrowser rows={rows} />;
+  return <RepositoryBrowser rows={rows} focus={params.add !== undefined} />;
 }
 
-export default function WorkspacePage() {
+export default function WorkspacePage({ searchParams }: PageProps<"/">) {
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-8">
+    <div className="flex flex-1 flex-col">
       <Suspense
         fallback={
-          <div className="rounded-xl border border-border bg-surface px-4 py-10 text-center text-xs text-muted">
+          <div className="px-4 py-10 text-center text-xs text-muted">
             Loading repositories…
           </div>
         }
       >
-        <Repositories />
+        <Repositories searchParams={searchParams} />
       </Suspense>
     </div>
   );

@@ -19,8 +19,8 @@ interface NodeCardProps {
   traced: ReadonlyMap<string, Sides> | null;
   filter: Filter;
   filtering: boolean;
-  /** In hand mode cards don't take clicks; the whole canvas pans. */
-  selectable: boolean;
+  /** Header only: no file rows. */
+  compact: boolean;
   /** Index of the first file shown; the card shows MAX_VISIBLE_ROWS from here. */
   offset: number;
   onSelectFile: (path: string) => void;
@@ -35,7 +35,7 @@ export const NodeCard = memo(function NodeCard({
   traced,
   filter,
   filtering,
-  selectable,
+  compact,
   offset,
   onSelectFile,
 }: NodeCardProps) {
@@ -61,7 +61,7 @@ export const NodeCard = memo(function NodeCard({
     >
       <div
         data-card-header={node.id}
-        className={`relative flex items-center gap-3 border-b border-border/60 px-5 ${selectable ? "cursor-pointer" : ""}`}
+        className={`relative flex cursor-pointer items-center gap-3 px-5 ${compact ? "" : "border-b border-border/60"}`}
         style={{ height: HEADER_HEIGHT }}
       >
         <HeaderHandle side="left" lit={lit} />
@@ -84,6 +84,7 @@ export const NodeCard = memo(function NodeCard({
       </div>
       {/* A window of whole rows, stepped one file at a time by the wheel, so
           every row on screen sits exactly where its edges expect it. */}
+      {!compact && (
       <div data-rows={overflow ? node.id : undefined} className="relative" style={{ paddingBlock: LIST_PADDING }}>
         {overflow && (
           <span
@@ -104,11 +105,11 @@ export const NodeCard = memo(function NodeCard({
             traced={traced?.get(f.path)}
             dimmed={f.path !== hoveredFile && !traced?.has(f.path) && ((highlight !== null && !highlight.files.has(f.path)) || (filtering && !matches(f, filter)))}
             handles={highlight?.handles.get(f.path)}
-            selectable={selectable}
             onSelect={onSelectFile}
           />
         ))}
       </div>
+      )}
     </div>
   );
 });
@@ -131,7 +132,6 @@ function Row({
   traced,
   dimmed,
   handles,
-  selectable,
   onSelect,
 }: {
   file: FileRow;
@@ -140,7 +140,6 @@ function Row({
   traced: Sides | undefined;
   dimmed: boolean;
   handles: { left?: Direction; right?: Direction } | undefined;
-  selectable: boolean;
   onSelect: (path: string) => void;
 }) {
   return (
@@ -151,12 +150,12 @@ function Row({
       // Pointer clicks are resolved by the canvas, which tells a click from a
       // pan; this only answers the keyboard.
       onKeyDown={(e) => {
-        if (!selectable || (e.key !== "Enter" && e.key !== " ")) return;
+        if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
         onSelect(file.path);
       }}
       className={`relative mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-3 rounded-lg px-5 text-left ${
-        selected ? "bg-accent/8 ring-1 ring-accent/40" : hovered ? "bg-background ring-1 ring-border" : selectable ? "hover:bg-background" : ""
+        selected ? "bg-accent/8 ring-1 ring-accent/40" : hovered ? "bg-background ring-1 ring-border" : "hover:bg-background"
       } ${dimmed ? "opacity-40" : ""}`}
       style={{ height: ROW_HEIGHT }}
     >

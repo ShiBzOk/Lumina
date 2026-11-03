@@ -23,11 +23,12 @@ interface MinimapProps {
   size: { w: number; h: number };
   /** Nodes lit by the current selection, or null when nothing is selected. */
   lit: ReadonlySet<string> | null;
+  compact: boolean;
   /** Centre the canvas on this world point. */
   onCenter: (x: number, y: number) => void;
 }
 
-export function Minimap({ nodes, positions, bounds, viewport, size, lit, onCenter }: MinimapProps) {
+export function Minimap({ nodes, positions, bounds, viewport, size, lit, compact, onCenter }: MinimapProps) {
   const dragging = useRef(false);
   const scale = Math.min((W - PAD * 2) / (bounds.maxX - bounds.minX), (H - PAD * 2) / (bounds.maxY - bounds.minY));
   const ox = PAD + (W - PAD * 2 - (bounds.maxX - bounds.minX) * scale) / 2;
@@ -68,7 +69,7 @@ export function Minimap({ nodes, positions, bounds, viewport, size, lit, onCente
             x={m.x}
             y={m.y}
             width={CARD_WIDTH * scale}
-            height={cardHeight(n.files.length) * scale}
+            height={cardHeight(n.files.length, compact) * scale}
             rx={2}
             fill={on ? "var(--accent)" : "#c6cfdc"}
             fillOpacity={lit && !on ? 0.45 : 0.9}

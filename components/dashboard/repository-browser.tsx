@@ -21,128 +21,97 @@ export interface RepositoryRow {
   stale: boolean;
 }
 
-export function RepositoryBrowser({ rows }: { rows: RepositoryRow[] }) {
+export function RepositoryBrowser({ rows, focus }: { rows: RepositoryRow[]; focus: boolean }) {
   const [query, setQuery] = useState("");
-  // Open by default only when there is nothing else to do here.
-  const [adding, setAdding] = useState(rows.length === 0);
   const q = query.trim().toLowerCase();
   const shown = q ? rows.filter((r) => r.repo.includes(q)) : rows;
 
   return (
-    <>
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-semibold tracking-[-0.01em]">Repositories</h1>
-          <p className="mt-0.5 text-xs text-muted">Select a repository to explore its module architecture or clone a new one.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="flex h-8 w-56 items-center gap-2 rounded-lg border border-border bg-surface px-2.5 text-xs focus-within:border-accent">
-            <Icon name="search" className="size-3.5 text-muted" />
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search…"
-              className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted"
-            />
-          </label>
-          <button
-            type="button"
-            onClick={() => setAdding((a) => !a)}
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-border/70 px-3 text-xs font-medium text-foreground hover:bg-border"
-          >
-            <Icon name={adding ? "x" : "plus"} className="size-3.5" />
-            {adding ? "Cancel" : "Add repository"}
-          </button>
-        </div>
-      </header>
+    <div className="mx-auto flex w-full max-w-2xl flex-col px-4 py-12 sm:py-20">
+      <h1 className="text-center text-2xl font-semibold tracking-[-0.025em] sm:text-3xl">Map a repository</h1>
+      <p className="mx-auto mt-2 max-w-md text-center text-[13px] text-muted">
+        Paste a public GitHub repository. Lumina parses every import and draws the files and the connections between them.
+      </p>
 
-      {adding && <CloneForm />}
+      <CloneForm autoFocus={focus || rows.length === 0} />
 
-      {rows.length === 0 ? (
-        <div className="rounded-xl border border-border bg-surface px-4 py-10 text-center">
-          <p className="text-xs font-medium">No repositories yet</p>
-          <p className="mt-1 text-xs text-muted">Paste a public GitHub repository above to map it.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-surface">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-background/60 text-[11px] text-muted">
-              <tr>
-                <th className="px-3.5 py-2 font-medium">Repository</th>
-                <th className="w-20 px-3.5 py-2 font-medium">Files</th>
-                <th className="w-20 px-3.5 py-2 font-medium">Packages</th>
-                <th className="w-32 px-3.5 py-2 font-medium">Status</th>
-                <th className="w-32 px-3.5 py-2 text-right font-medium">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((row) => (
-                <Row key={row.id} row={row} />
-              ))}
-              {shown.length === 0 && (
-                <tr className="border-t border-border">
-                  <td colSpan={5} className="px-3.5 py-6 text-center text-muted">
-                    No repository matches “{query.trim()}”.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+      {rows.length > 0 && (
+        <section className="mt-10">
+          <header className={`mb-3 flex items-center gap-3 ${rows.length > 4 ? "justify-between" : "justify-center"}`}>
+            <h2 className="text-[11px] font-semibold tracking-wider text-muted uppercase">Your repositories</h2>
+            {rows.length > 4 && (
+              <label className="flex h-7 w-40 items-center gap-1.5 rounded-md border border-border bg-surface px-2 text-[11px] focus-within:border-accent">
+                <Icon name="search" className="size-3 text-muted" />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Filter…"
+                  aria-label="Filter repositories"
+                  className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted"
+                />
+              </label>
+            )}
+          </header>
+          <ul className="grid gap-2.5 sm:grid-cols-2">
+            {shown.map((row) => (
+              <Card key={row.id} row={row} />
+            ))}
+          </ul>
+          {shown.length === 0 && <p className="py-6 text-center text-xs text-muted">No repository matches “{query.trim()}”.</p>}
+        </section>
       )}
-    </>
+    </div>
   );
 }
 
 const EMPTY: SubmitState = { error: null, repo: "", branch: "" };
 
-function CloneForm() {
+function CloneForm({ autoFocus }: { autoFocus: boolean }) {
   const [state, action, pending] = useActionState(submitRepository, EMPTY);
   return (
-    <form action={action} className="rounded-xl border border-border bg-surface p-4">
-      <label htmlFor="repo" className="text-xs font-medium">
-        Clone from GitHub URL
-      </label>
-      <div className="mt-2 flex gap-2">
-        <div className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-border px-2.5 focus-within:border-accent">
-          <Icon name="github" className="size-3.5 text-muted" />
+    <form action={action} className="mt-7">
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/80 bg-surface p-2.5 shadow-[0_1px_2px_rgb(16_24_40/0.04),0_8px_24px_-6px_rgb(16_24_40/0.08)] focus-within:border-accent">
+        <div className="flex h-10 min-w-0 flex-[1_1_16rem] items-center gap-2.5 px-2.5">
+          <Icon name="github" className="size-4 shrink-0 text-muted" />
           <input
-            id="repo"
             name="repo"
             required
-            autoFocus
+            autoFocus={autoFocus}
             defaultValue={state.repo}
-            placeholder="owner/name or https://github.com/owner/name"
-            className="min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:font-sans placeholder:text-muted"
+            aria-label="Repository"
+            placeholder="owner/name or github.com URL"
+            className="min-w-0 flex-1 bg-transparent font-mono text-[13px] outline-none placeholder:font-sans placeholder:text-muted"
           />
         </div>
-        <div className="flex h-9 w-36 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 font-mono text-[11px] focus-within:border-accent">
-          <Icon name="branch" className="size-3.5 shrink-0 text-muted" />
-          <span className="text-muted">branch:</span>
-          <input
-            name="branch"
-            defaultValue={state.branch}
-            placeholder="default"
-            aria-label="Branch"
-            className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted"
-          />
+        <div className="flex flex-1 gap-2 sm:flex-none">
+          <div className="flex h-10 min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-border bg-background px-2.5 font-mono text-[11px] focus-within:border-accent sm:w-36 sm:flex-none">
+            <Icon name="branch" className="size-3.5 shrink-0 text-muted" />
+            <span className="text-muted">branch:</span>
+            <input
+              name="branch"
+              defaultValue={state.branch}
+              placeholder="default"
+              aria-label="Branch"
+              className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={pending}
+            className="flex h-11 shrink-0 items-center gap-1.5 rounded-xl bg-accent px-5 shadow-[0_1px_2px_rgb(10_108_240/0.3)] text-[13px] font-semibold text-surface hover:bg-accent/90 disabled:opacity-60"
+          >
+            {pending ? "Starting…" : "Map it"}
+            <Icon name="arrowRight" className="size-3.5" />
+          </button>
         </div>
-        <button
-          type="submit"
-          disabled={pending}
-          className="flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3.5 text-xs font-semibold text-surface hover:bg-accent/90 disabled:opacity-60"
-        >
-          {pending ? "Starting…" : "Index Repo"}
-          <Icon name="arrowRight" className="size-3.5" />
-        </button>
       </div>
       {state.error && <p className="mt-2 text-[11px] text-danger">{state.error}</p>}
     </form>
   );
 }
 
-function Row({ row }: { row: RepositoryRow }) {
+function Card({ row }: { row: RepositoryRow }) {
   const initial = { status: row.status, stage: row.stage, message: row.message };
   const { event, unavailable } = useAnalysisStage(row.id, initial);
   // Any word from the run means it is alive, whatever the server thought.
@@ -155,58 +124,40 @@ function Row({ row }: { row: RepositoryRow }) {
   else if (unavailable) note = { text: "Live updates unavailable; refresh to see the latest stage.", className: "text-muted" };
   else if (!done && event.message) note = { text: event.message, className: "text-muted" };
 
+  const status = statusOf(event.status, event.stage, stale);
+
   return (
-    <tr className="border-t border-border">
-      <td className="px-3.5 py-2.5">
-        <div className="flex items-center gap-3">
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted">
-            <Icon name="github" className="size-3.5" />
-          </span>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="font-mono text-xs font-medium">{row.repo}</span>
-              {row.branch && <span className="rounded bg-background px-1 font-mono text-[10px] text-muted ring-1 ring-border">{row.branch}</span>}
-            </div>
-            {note && <p className={`mt-0.5 truncate text-[11px] ${note.className}`}>{note.text}</p>}
+    <li>
+      <Link
+        href={`/analyses/${row.id}`}
+        className="group flex items-center gap-3 rounded-xl border border-border/80 bg-surface px-4 py-3 shadow-[0_1px_2px_rgb(16_24_40/0.04),0_2px_8px_-2px_rgb(16_24_40/0.06)] hover:border-accent/40"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className={`size-1.5 shrink-0 rounded-full ${status.dot}`} title={status.label} aria-hidden />
+            <span className="sr-only">{status.label}:</span>
+            <span className="truncate font-mono text-xs font-medium">{row.repo}</span>
+            {row.branch && <span className="shrink-0 font-mono text-[10px] text-muted">@{row.branch}</span>}
           </div>
+          <p className={`mt-0.5 truncate text-[11px] ${note?.className ?? "text-muted"}`}>{note?.text ?? status.label}</p>
         </div>
-      </td>
-      <td className="px-3.5 py-2.5 font-mono text-[11px] tabular-nums">{done && row.files !== null ? formatCount(row.files) : <Dash />}</td>
-      <td className="px-3.5 py-2.5 font-mono text-[11px] tabular-nums">{done && row.packages !== null ? formatCount(row.packages) : <Dash />}</td>
-      <td className="px-3.5 py-2.5">
-        <StatusPill status={event.status} stage={event.stage} stale={stale} />
-      </td>
-      <td className="px-3.5 py-2.5 text-right">
-        <Link
-          href={`/analyses/${row.id}`}
-          className="inline-flex items-center gap-1.5 rounded-md bg-background px-2.5 py-1 text-[11px] font-medium ring-1 ring-border hover:bg-border/60"
-        >
-          {done ? "Open Canvas" : event.status === "failed" || stale ? "View" : "View progress"}
-          <Icon name="arrowRight" className="size-3" />
-        </Link>
-      </td>
-    </tr>
+        {done && row.files !== null && (
+          <span className="shrink-0 rounded-md bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted tabular-nums ring-1 ring-border/70">
+            {formatCount(row.files)} files
+          </span>
+        )}
+        <Icon name="arrowRight" className="size-3.5 shrink-0 text-muted group-hover:text-accent" />
+      </Link>
+    </li>
   );
 }
 
-function Dash() {
-  return <span className="text-muted">—</span>;
-}
-
-// Colour says one thing: finished, going, or broken. Stale is deliberately not
-// a colour of its own; it reads as "unknown", which is what it is.
-function StatusPill({ status, stage, stale }: { status: AnalysisStatus; stage: AnalysisStage | null; stale: boolean }) {
-  let label: string;
-  let className: string;
-  if (status === "complete") [label, className] = ["Ready", "border-success/30 bg-success/10 text-success"];
-  else if (status === "failed") [label, className] = [stage ? `Failed · ${stage}` : "Failed", "border-danger/30 bg-danger/10 text-danger"];
-  else if (stale) [label, className] = [`Stale · ${stage ?? status}`, "border-dashed border-muted/60 bg-background text-muted"];
-  else if (status === "queued" || !stage) [label, className] = ["Queued", "border-border bg-background text-muted"];
-  else [label, className] = [STAGE_LABEL[stage], "border-accent/30 bg-accent/10 text-accent"];
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap ${className}`}>
-      <span className="size-1.5 rounded-full bg-current" aria-hidden />
-      {label}
-    </span>
-  );
+// Colour says one thing: ready, going, or broken. Queued and stale stay grey;
+// stale reads as "unknown", which is what it is.
+function statusOf(status: AnalysisStatus, stage: AnalysisStage | null, stale: boolean): { label: string; dot: string } {
+  if (status === "complete") return { label: "Ready", dot: "bg-success" };
+  if (status === "failed") return { label: stage ? `Failed · ${stage}` : "Failed", dot: "bg-danger" };
+  if (stale) return { label: `Stale · ${stage ?? status}`, dot: "bg-muted/60" };
+  if (status === "queued" || !stage) return { label: "Queued", dot: "bg-muted/60" };
+  return { label: STAGE_LABEL[stage], dot: "bg-accent" };
 }

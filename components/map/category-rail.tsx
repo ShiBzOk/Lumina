@@ -8,10 +8,6 @@ import { Icon } from "./icons";
 
 interface CategoryRailProps {
   total: number;
-  /** Files not hidden by the type filter: the sum of the area counts. */
-  matching: number;
-  /** Top-level directories and how many of their files the type filter keeps, largest first. */
-  areas: readonly { area: string; count: number }[];
   /** Null when no framework adapter applied: then files have no roles to list. */
   framework: Framework | null;
   /** Files per role, over the whole repository. */
@@ -25,7 +21,7 @@ interface CategoryRailProps {
   onCollapse: () => void;
 }
 
-export function CategoryRail({ total, matching, areas, framework, roleCounts, modelRoleCounts, types, filter, onFilter, onCollapse }: CategoryRailProps) {
+export function CategoryRail({ total, framework, roleCounts, modelRoleCounts, types, filter, onFilter, onCollapse }: CategoryRailProps) {
   const modelLabel = MODEL_CATEGORIES.find((c) => c.role === filter.modelRole)?.label;
   const roleLabel = framework?.categories.find((c) => c.role === filter.role)?.label ?? (modelLabel && `${modelLabel}, by the model`);
   const toggleType = (type: FileType) => {
@@ -46,16 +42,14 @@ export function CategoryRail({ total, matching, areas, framework, roleCounts, mo
         </button>
       </div>
 
-      {(filter.area !== null || filter.role !== null || filter.modelRole !== null) && (
+      {roleLabel && (
         <div className="flex items-center gap-2 border-b border-border bg-background px-3 py-2 text-[11px]">
           <span className="min-w-0 flex-1 truncate text-muted">
-            Filtering: {roleLabel && <span className="text-foreground">{roleLabel}</span>}
-            {roleLabel && filter.area !== null && " · "}
-            {filter.area !== null && <span className="font-mono text-foreground">{filter.area}</span>}
+            Filtering: <span className="text-foreground">{roleLabel}</span>
           </span>
           <button
             type="button"
-            onClick={() => onFilter({ ...filter, area: null, role: null, modelRole: null })}
+            onClick={() => onFilter({ ...filter, role: null, modelRole: null })}
             className="flex items-center gap-0.5 text-muted underline-offset-2 hover:text-foreground hover:underline"
           >
             <Icon name="x" className="size-3" /> Clear
@@ -71,7 +65,7 @@ export function CategoryRail({ total, matching, areas, framework, roleCounts, mo
             {framework.categories.map(({ role, label }) => {
               const count = roleCounts.get(role) ?? 0;
               return (
-                <AreaButton
+                <CategoryButton
                   key={role}
                   label={label}
                   count={count}
@@ -90,7 +84,7 @@ export function CategoryRail({ total, matching, areas, framework, roleCounts, mo
             {/* Apart from convention's roles: a label is the model's reading, not something the code states. */}
             <p className="px-1.5 pt-3 pb-1 text-[10px] text-muted">Labelled by the model</p>
             {MODEL_CATEGORIES.filter(({ role }) => modelRoleCounts.has(role)).map(({ role, label }) => (
-              <AreaButton
+              <CategoryButton
                 key={role}
                 label={label}
                 count={modelRoleCounts.get(role) ?? 0}
@@ -100,18 +94,6 @@ export function CategoryRail({ total, matching, areas, framework, roleCounts, mo
             ))}
           </>
         )}
-        <p className="px-1.5 pt-3 pb-1 text-[10px] text-muted">Top-level folders</p>
-        <AreaButton label="All files" count={matching} active={filter.area === null} onClick={() => onFilter({ ...filter, area: null })} />
-        {areas.map(({ area, count }) => (
-          <AreaButton
-            key={area}
-            label={area}
-            mono
-            count={count}
-            active={filter.area === area}
-            onClick={() => onFilter({ ...filter, area: filter.area === area ? null : area })}
-          />
-        ))}
       </nav>
 
       <div className="border-t border-border px-3 py-2.5">
@@ -144,18 +126,16 @@ export function CategoryRail({ total, matching, areas, framework, roleCounts, mo
   );
 }
 
-function AreaButton({
+function CategoryButton({
   label,
   count,
   active,
-  mono = false,
   disabled = false,
   onClick,
 }: {
   label: string;
   count: number;
   active: boolean;
-  mono?: boolean;
   disabled?: boolean;
   onClick: () => void;
 }) {
@@ -168,7 +148,7 @@ function AreaButton({
         active ? "bg-foreground font-medium text-surface" : disabled ? "text-muted/70" : "text-foreground/80 hover:bg-background"
       }`}
     >
-      <span className={`truncate ${mono ? "font-mono text-[11px]" : ""}`}>{label}</span>
+      <span className="truncate">{label}</span>
       <span className={`font-mono text-[10.5px] tabular-nums ${active ? "text-surface/80" : "text-muted"}`}>{count}</span>
     </button>
   );

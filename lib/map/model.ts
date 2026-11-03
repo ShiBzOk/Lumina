@@ -4,7 +4,7 @@
 import type { Edge, RepoFile } from "../../parser/types.ts";
 import { fold, shortestUniqueLabels } from "./fold.ts";
 import type { ModelRole } from "./frameworks.ts";
-import { layout, type Point } from "./layout.ts";
+import { cardHeight, layout, type Point } from "./layout.ts";
 
 /** What sort of file this is, by extension. Each one is a colour on the map. */
 export type FileType = "react" | "typescript" | "javascript" | "component" | "css" | "json" | "other";
@@ -41,18 +41,11 @@ export function fileTypeOf(path: string): FileType {
   return (dot === -1 ? undefined : EXTENSIONS[path.slice(dot + 1).toLowerCase()]) ?? "other";
 }
 
-/** The top-level directory a file lives under: a fact about the tree, not a guess about its purpose. */
-export function areaOf(path: string): string {
-  const slash = path.indexOf("/");
-  return slash === -1 ? "(root)" : path.slice(0, slash);
-}
-
 export interface FileRow {
   path: string;
   /** Path relative to the node's directory, unique within the card. */
   label: string;
   type: FileType;
-  area: string;
   /** What the framework adapter says this file is, or null. */
   role: string | null;
   /** The model's label for a file the adapter left without a role. Never structural. */
@@ -81,6 +74,8 @@ export interface RepoMap {
   edges: MapEdge[];
   nodeOf: Map<string, string>;
   positions: Map<string, Point>;
+  /** Laid out again for header-only cards, so compacting closes the gaps rather than leaving them. */
+  compactPositions: Map<string, Point>;
 }
 
 export function buildMap(files: readonly RepoFile[], edges: readonly Edge[], modelRoles: ReadonlyMap<string, ModelRole>): RepoMap {
@@ -99,7 +94,6 @@ export function buildMap(files: readonly RepoFile[], edges: readonly Edge[], mod
           path,
           label: n.id === "." ? path : path.slice(n.id.length + 1),
           type: fileTypeOf(path),
-          area: areaOf(path),
           role: f.role,
           modelRole: modelRoles.get(path) ?? null,
           fanIn: f.fanIn,
@@ -117,10 +111,15 @@ export function buildMap(files: readonly RepoFile[], edges: readonly Edge[], mod
     return fromNode && toNode ? [{ from: e.from, to: e.to, fromNode, toNode }] : [];
   });
 
+  const links = mapEdges.map((e) => ({ from: e.fromNode, to: e.toNode }));
   const positions = layout(
-    nodes.map((n) => ({ id: n.id, rows: n.files.length })),
-    mapEdges.map((e) => ({ from: e.fromNode, to: e.toNode })),
+    nodes.map((n) => ({ id: n.id, height: cardHeight(n.files.length) })),
+    links,
+  );
+  const compactPositions = layout(
+    nodes.map((n) => ({ id: n.id, height: cardHeight(n.files.length, true) })),
+    links,
   );
 
-  return { threshold: folded.threshold, nodes, edges: mapEdges, nodeOf: folded.nodeOf, positions };
+  return { threshold: folded.threshold, nodes, edges: mapEdges, nodeOf: folded.nodeOf, positions, compactPositions };
 }

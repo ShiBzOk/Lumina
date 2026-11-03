@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { AccountButton } from "@/components/account-button";
+import { Logo } from "@/components/logo";
 import { explain } from "@/app/analyses/actions";
 import { frameworkOf, MODEL_CATEGORIES, type ModelRole } from "@/lib/map/frameworks";
 import { highlight, isFiltering, matches, NO_FILTER, sameSelection, type Filter, type Selection } from "@/lib/map/highlight";
@@ -18,9 +18,12 @@ import { DetailPane, type PaneTab } from "./detail-pane";
 import { explainKey, type ExplainState } from "./explanation";
 import { Icon } from "./icons";
 import { FileSearch } from "./file-search";
+import { RepoSwitcher, type RepositoryOption } from "./repo-switcher";
 
 interface MapWorkspaceProps {
   meta: { analysisId: string; repo: string; branch: string; commit: string };
+  /** The organization's analyses, for switching between them. */
+  repositories: RepositoryOption[];
   adapter: string;
   files: RepoFile[];
   edges: Edge[];
@@ -36,7 +39,7 @@ interface MapWorkspaceProps {
 
 // The shell: header across the top, categories on the left, the canvas in the
 // middle, details on the right. Later phases add to these panels, not move them.
-export function MapWorkspace({ meta, adapter, files, edges, imports, routes, routesWithheld, coverage, labels, model, tracing }: MapWorkspaceProps) {
+export function MapWorkspace({ meta, repositories, adapter, files, edges, imports, routes, routesWithheld, coverage, labels, model, tracing }: MapWorkspaceProps) {
   const modelRoles = useMemo(() => new Map(labels.map((l) => [l.path, l.role])), [labels]);
   const map = useMemo(() => buildMap(files, edges, modelRoles), [files, edges, modelRoles]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -80,14 +83,6 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
   const graph = useMemo(() => adjacency(edges), [edges]);
   const insights = useMemo(() => findInsights(files, edges, adapter), [files, edges, adapter]);
 
-  // Counted under the type filter too, so an area's number is the sum of
-  // what its cards say matched.
-  const areas = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const n of map.nodes)
-      for (const f of n.files) if (!filter.hiddenTypes.has(f.type)) counts.set(f.area, (counts.get(f.area) ?? 0) + 1);
-    return [...counts].map(([area, count]) => ({ area, count })).sort((a, b) => b.count - a.count || (a.area < b.area ? -1 : 1));
-  }, [map, filter.hiddenTypes]);
   const types = useMemo(() => new Set(files.map((f) => fileTypeOf(f.path))), [files]);
   const framework = frameworkOf(adapter);
   const roleCounts = useMemo(() => {
@@ -127,7 +122,6 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
   const filterName = [
     framework?.categories.find((c) => c.role === filter.role)?.label,
     MODEL_CATEGORIES.find((c) => c.role === filter.modelRole)?.label,
-    filter.area,
     filter.hiddenTypes.size > 0 ? `${filter.hiddenTypes.size} type${filter.hiddenTypes.size > 1 ? "s" : ""} hidden` : null,
   ]
     .filter(Boolean)
@@ -136,16 +130,9 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
   return (
     <div className="flex h-screen flex-col bg-background">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
-        <Link href="/" title="Back to analyses" className="rounded-md p-1.5 text-muted hover:bg-background hover:text-foreground">
-          <Icon name="arrowLeft" className="size-4" />
-        </Link>
-        <span className="text-[19px] font-semibold tracking-[-0.03em]">Lumina</span>
+        <Logo />
         <span className="h-5 w-px bg-border" aria-hidden />
-        <span className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 font-mono text-[11px]">
-          <Icon name="repo" className="size-3.5 text-accent" />
-          {meta.repo}
-          <span className="rounded bg-background px-1 text-[10px] text-muted ring-1 ring-border">{meta.branch}</span>
-        </span>
+        <RepoSwitcher current={meta.analysisId} repo={meta.repo} branch={meta.branch} repositories={repositories} />
 
         <div className="flex flex-1 items-center justify-center gap-2 font-mono text-[11px] text-muted">
           <Icon name="branch" className="size-3.5" />
@@ -154,16 +141,7 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
           <span>{edges.length} dependency links</span>
         </div>
 
-        <FileSearch rows={map.nodes.flatMap((n) => n.files)} onPick={(path) => selectAndReveal({ kind: "file", path })} />
-        <button
-          type="button"
-          title={railOpen ? "Hide categories" : "Show categories"}
-          aria-pressed={railOpen}
-          onClick={() => setRailOpen((o) => !o)}
-          className={`rounded-md p-1.5 hover:bg-background ${railOpen ? "text-foreground" : "text-muted"}`}
-        >
-          <Icon name="sliders" className="size-4" />
-        </button>
+        <FileSearch nodes={map.nodes} onPick={selectAndReveal} />
         <AccountButton />
       </header>
 
@@ -173,8 +151,6 @@ export function MapWorkspace({ meta, adapter, files, edges, imports, routes, rou
         {railOpen && (
           <CategoryRail
             total={files.length}
-            matching={areas.reduce((n, a) => n + a.count, 0)}
-            areas={areas}
             framework={framework}
             roleCounts={roleCounts}
             modelRoleCounts={modelRoleCounts}

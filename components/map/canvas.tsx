@@ -46,7 +46,7 @@ type Gesture =
   | { type: "pan"; sx: number; sy: number; vx: number; vy: number; moved: boolean; row: string | undefined }
   | { type: "drag"; id: string; sx: number; sy: number; px: number; py: number; moved: boolean };
 
-function boundsOf(nodes: readonly MapNode[], positions: ReadonlyMap<string, Point>): Bounds {
+function boundsOf(nodes: readonly MapNode[], positions: ReadonlyMap<string, Point>, compact: boolean): Bounds {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -57,7 +57,7 @@ function boundsOf(nodes: readonly MapNode[], positions: ReadonlyMap<string, Poin
     minX = Math.min(minX, p.x);
     minY = Math.min(minY, p.y);
     maxX = Math.max(maxX, p.x + CARD_WIDTH);
-    maxY = Math.max(maxY, p.y + cardHeight(n.files.length));
+    maxY = Math.max(maxY, p.y + cardHeight(n.files.length, compact));
   }
   return minX === Infinity ? { minX: 0, minY: 0, maxX: 1, maxY: 1 } : { minX, minY, maxX, maxY };
 }
@@ -85,21 +85,27 @@ interface CanvasProps {
 
 export function Canvas({ map, selection, highlight, hovered, filter, onSelect, onHover, banner, children, ref }: CanvasProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const [positions, setPositions] = useState(() => new Map(map.positions));
+  const [compact, setCompact] = useState(false);
+  // Each starts as its layout itself, so "moved" is just "no longer the same map".
+  // Kept apart, so arranging one view leaves the other as it was.
+  const [fullPositions, setFullPositions] = useState<ReadonlyMap<string, Point>>(map.positions);
+  const [compactPositions, setCompactPositions] = useState<ReadonlyMap<string, Point>>(map.compactPositions);
+  const positions = compact ? compactPositions : fullPositions;
+  const setPositions = compact ? setCompactPositions : setFullPositions;
+  const laidOut = compact ? map.compactPositions : map.positions;
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, k: 1 });
   const [size, setSize] = useState({ w: 0, h: 0 });
   // First file shown in each card that holds more than MAX_VISIBLE_ROWS.
   const [offsets, setOffsets] = useState<ReadonlyMap<string, number>>(new Map());
-  const [mode, setMode] = useState<"select" | "hand">("select");
-  const [grid, setGrid] = useState(true);
   const [minimap, setMinimap] = useState(true);
+  const [onlyLit, setOnlyLit] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const gesture = useRef<Gesture | null>(null);
 
   // Read inside observers and native listeners, which outlive a render.
-  const live = useRef({ viewport, size, positions });
+  const live = useRef({ viewport, size, positions, compact });
   useEffect(() => {
-    live.current = { viewport, size, positions };
+    live.current = { viewport, size, positions, compact };
   });
 
   const filtering = isFiltering(filter);
@@ -123,7 +129,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
       const prev = live.current.size;
       setSize({ w, h });
       if (w === 0 || h === 0) return;
-      const fitted = fit(boundsOf(map.nodes, live.current.positions), w, h);
+      const fitted = fit(boundsOf(map.nodes, live.current.positions, live.current.compact), w, h);
       if (prev.w === 0) return setViewport(fitted);
       setViewport((v) => (fitted.k < v.k ? fitted : { ...v, x: v.x + (w - prev.w) / 2, y: v.y + (h - prev.h) / 2 }));
     });
@@ -197,10 +203,10 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
             return new Map(o).set(id, Math.min(max, Math.max(0, index - Math.floor(MAX_VISIBLE_ROWS / 2))));
           });
         }
-        const { viewport: v, size: s, positions: ps } = live.current;
+        const { viewport: v, size: s, positions: ps, compact: c } = live.current;
         const p = ps.get(id);
         if (!p) return;
-        const h = cardHeight(rowCount.get(id) ?? 0);
+        const h = cardHeight(rowCount.get(id) ?? 0, c);
         const left = p.x * v.k + v.x;
         const top = p.y * v.k + v.y;
         const inView = left >= 0 && top >= 0 && left + CARD_WIDTH * v.k <= s.w && top + h * v.k <= s.h;
@@ -215,7 +221,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
     if (e.button !== 0 || !(e.target instanceof Element)) return;
     if (e.target.closest("[data-overlay]")) return;
     const header = e.target.closest<HTMLElement>("[data-card-header]");
-    if (mode === "select" && header) {
+    if (header) {
       const id = header.dataset.cardHeader ?? "";
       const p = positions.get(id);
       if (!p) return;
@@ -223,7 +229,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
     } else {
       // Holding and dragging anywhere else moves the map, file rows included;
       // a row pressed and released without moving is still a click on it.
-      const row = mode === "select" ? e.target.closest<HTMLElement>("[data-row]")?.dataset.row : undefined;
+      const row = e.target.closest<HTMLElement>("[data-row]")?.dataset.row;
       gesture.current = { type: "pan", sx: e.clientX, sy: e.clientY, vx: viewport.x, vy: viewport.y, moved: false, row };
     }
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -251,7 +257,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
     if (!g || g.moved) return;
     if (g.type === "drag") onSelect({ kind: "node", id: g.id });
     else if (g.row) onSelect({ kind: "file", path: g.row });
-    else if (mode === "select" && !(e.target instanceof Element && e.target.closest("[data-card]"))) onSelect(null);
+    else if (!(e.target instanceof Element && e.target.closest("[data-card]"))) onSelect(null);
   };
 
   // A row is the file; anywhere else on a card is its folder. Nothing reports
@@ -266,12 +272,14 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
   const onSelectFile = useCallback((path: string) => onSelect({ kind: "file", path }), [onSelect]);
 
   // Where a file sits in its card's window, or null when it isn't shown.
+  // Compact cards show no rows, so every connection meets a header.
   const rowSlot = useCallback(
     (node: string, path: string) => {
+      if (compact) return null;
       const slot = (rowIndex.get(path) ?? 0) - (offsets.get(node) ?? 0);
       return slot >= 0 && slot < MAX_VISIBLE_ROWS ? slot : null;
     },
-    [rowIndex, offsets],
+    [rowIndex, offsets, compact],
   );
 
   const edgePaths = useMemo(() => {
@@ -280,6 +288,8 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
     // The hovered file's own connections, drawn last so nothing crosses them.
     const top: ReactNode[] = [];
     const hoveredPath = hovered?.kind === "file" ? hovered.path : null;
+    // Header to header, many file links between two folders are one curve; draw it once.
+    const drawn = new Set<string>();
     map.edges.forEach((e, i) => {
       const a = positions.get(e.fromNode);
       const b = positions.get(e.toNode);
@@ -290,7 +300,16 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
       // Only files on screen are connected. A lit edge is the exception: a
       // selection never loses a connection, so its hidden end meets the header.
       const hot = hoveredPath !== null && (e.from === hoveredPath || e.to === hoveredPath);
-      if ((fromSlot === null || toSlot === null) && !direction && !hot) return;
+      if (!compact && (fromSlot === null || toSlot === null) && !direction && !hot) return;
+      if (onlyLit && !direction && !hot) return;
+      // A compact card shows no files, so a link inside one folder would loop
+      // from its header back to the same point: a stub that goes nowhere.
+      if (compact && e.fromNode === e.toNode) return;
+      if (compact) {
+        const key = `${e.fromNode}>${e.toNode}>${direction ?? ""}`;
+        if (drawn.has(key)) return;
+        drawn.add(key);
+      }
       const rowY = (slot: number | null) => (slot === null ? HEADER_HEIGHT / 2 : HEADER_HEIGHT + LIST_PADDING + slot * ROW_HEIGHT + ROW_HEIGHT / 2);
       const x1 = a.x + CARD_WIDTH;
       const y1 = a.y + rowY(fromSlot);
@@ -299,7 +318,9 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
       // between folders it leaves the importer's right and enters the target's left.
       const same = e.fromNode === e.toNode;
       const x2 = same ? x1 : b.x;
-      const dx = same ? 36 + Math.abs(y2 - y1) * 0.25 : Math.max(60, Math.abs(x2 - x1) * 0.5);
+      // A link back to a column on the left (a cycle) bends tightly: scaled to
+      // the distance, it would swing far out past the cards into empty canvas.
+      const dx = same ? 36 + Math.abs(y2 - y1) * 0.25 : x2 > x1 ? Math.max(60, (x2 - x1) * 0.5) : 60;
       const d = `M${x1},${y1} C${x1 + dx},${y1} ${same ? x2 + dx : x2 - dx},${y2} ${x2},${y2}`;
 
       if (hot) {
@@ -319,7 +340,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
       quiet.push(<path key={i} d={d} stroke="var(--edge)" strokeWidth={1} strokeOpacity={opacity} fill="none" />);
     });
     return [...quiet, ...lit, ...top];
-  }, [map.edges, positions, rowSlot, highlight, hovered, filtering, filter, rowsByPath]);
+  }, [map.edges, positions, rowSlot, highlight, hovered, filtering, filter, rowsByPath, compact, onlyLit]);
 
   // Which handles the hovered file's connections meet, per card and row. A
   // connection leaves its importer on the right and enters its target on the
@@ -340,7 +361,12 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
     return byNode;
   }, [hovered, map.edges]);
 
-  const bounds = useMemo(() => boundsOf(map.nodes, positions), [map.nodes, positions]);
+  const bounds = useMemo(() => boundsOf(map.nodes, positions, compact), [map.nodes, positions, compact]);
+  // The selection and everything it connects to.
+  const litBounds = useMemo(
+    () => (highlight ? boundsOf(map.nodes.filter((n) => highlight.nodes.has(n.id)), positions, compact) : null),
+    [map.nodes, highlight, positions, compact],
+  );
 
   const zoomBy = (factor: number) => zoomAt(size.w / 2, size.h / 2, factor);
 
@@ -353,18 +379,12 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
       onPointerCancel={onPointerUp}
       onPointerOver={onPointerOver}
       onPointerLeave={() => onHover(null)}
-      className={`relative min-w-0 flex-1 touch-none overflow-hidden bg-background select-none ${
-        mode === "hand" ? "cursor-grab active:cursor-grabbing" : ""
-      }`}
-      style={
-        grid
-          ? {
-              backgroundImage: "radial-gradient(circle, rgba(148, 158, 175, 0.2) 1px, transparent 1.4px)",
-              // Fixed to the screen, not the map: the same size at every zoom.
-              backgroundSize: "24px 24px",
-            }
-          : undefined
-      }
+      className="relative min-w-0 flex-1 touch-none overflow-hidden bg-background select-none"
+      style={{
+        backgroundImage: "radial-gradient(circle, rgba(148, 158, 175, 0.2) 1px, transparent 1.4px)",
+        // Fixed to the screen, not the map: the same size at every zoom.
+        backgroundSize: "24px 24px",
+      }}
     >
       <div
         className="absolute top-0 left-0 origin-top-left"
@@ -387,7 +407,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
             traced={traced.get(n.id) ?? null}
             filter={filter}
             filtering={filtering}
-            selectable={mode === "select"}
+            compact={compact}
             offset={offsets.get(n.id) ?? 0}
             onSelectFile={onSelectFile}
           />
@@ -407,6 +427,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
             viewport={viewport}
             size={size}
             lit={highlight?.nodes ?? null}
+            compact={compact}
             onCenter={(x, y) => setViewport((v) => ({ ...v, x: size.w / 2 - x * v.k, y: size.h / 2 - y * v.k }))}
           />
         </div>
@@ -418,11 +439,27 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
         data-overlay
         className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-xl bg-surface p-1 shadow-[0_2px_10px_rgba(16,24,40,0.08)] ring-1 ring-border"
       >
-        <ToolButton icon="pointer" label="Select" active={mode === "select"} solid onClick={() => setMode("select")} />
-        <ToolButton icon="hand" label="Pan" active={mode === "hand"} solid onClick={() => setMode("hand")} />
-        <Divider />
-        <ToolButton icon="grid" label="Dot grid" active={grid} onClick={() => setGrid((g) => !g)} />
+        <ToolButton icon="undo" label="Reset card layout" disabled={positions === laidOut} onClick={() => setPositions(laidOut)} />
         <ToolButton icon="map" label="Minimap" active={minimap} onClick={() => setMinimap((m) => !m)} />
+        <Divider />
+        <ToolButton
+          icon="fold"
+          label={compact ? "Show files" : "Compact cards"}
+          active={compact}
+          onClick={() => {
+            const next = !compact;
+            setCompact(next);
+            // The cards change size and place, so the old view would frame nothing in particular.
+            setViewport(fit(boundsOf(map.nodes, next ? compactPositions : fullPositions, next), size.w, size.h));
+          }}
+        />
+        <ToolButton icon="links" label="Only the selection's links" active={onlyLit} onClick={() => setOnlyLit((o) => !o)} />
+        <ToolButton
+          icon="focus"
+          label="Fit to selection"
+          disabled={litBounds === null}
+          onClick={() => litBounds && setViewport(fit(litBounds, size.w, size.h))}
+        />
         <Divider />
         <ToolButton icon="zoomOut" label="Zoom out" onClick={() => zoomBy(1 / 1.2)} />
         <button
@@ -448,25 +485,28 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
 function ToolButton({
   icon,
   label,
-  active = false,
-  solid = false,
+  active,
+  disabled = false,
   onClick,
 }: {
   icon: IconName;
   label: string;
+  /** Only for toggles; an action button leaves it out. */
   active?: boolean;
-  solid?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
-  const on = solid ? "bg-foreground text-surface" : "bg-accent/10 text-accent";
   return (
     <button
       type="button"
       title={label}
       aria-label={label}
       aria-pressed={active}
+      disabled={disabled}
       onClick={onClick}
-      className={`flex size-8 items-center justify-center rounded-lg ${active ? on : "text-muted hover:bg-background hover:text-foreground"}`}
+      className={`flex size-8 items-center justify-center rounded-lg ${
+        active ? "bg-accent/10 text-accent" : disabled ? "text-muted/40" : "text-muted hover:bg-background hover:text-foreground"
+      }`}
     >
       <Icon name={icon} className="size-4" />
     </button>

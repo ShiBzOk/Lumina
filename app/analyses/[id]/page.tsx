@@ -5,7 +5,7 @@ import { AnalysisProgress } from "@/components/analysis/progress";
 import { MapWorkspace } from "@/components/map/map-workspace";
 import { WorkspaceHeader } from "@/components/workspace-header";
 import { MODEL, tracing } from "@/lib/ai/client";
-import { getAnalysis, loadGraph } from "@/lib/analyses";
+import { getAnalysis, listAnalyses, loadGraph } from "@/lib/analyses";
 
 export const metadata: Metadata = { title: "Analysis · Lumina" };
 
@@ -21,11 +21,17 @@ async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["param
     if (!analysis.branch || !analysis.commit_sha || !analysis.adapter) {
       throw new Error(`Analysis ${analysis.id} is complete but has no branch, commit or adapter recorded`);
     }
-    const { files, edges, imports, routes, routesWithheld, coverage, labels } = await loadGraph(analysis);
+    const [{ files, edges, imports, routes, routesWithheld, coverage, labels }, analyses] = await Promise.all([loadGraph(analysis), listAnalyses()]);
     // Only what the browser needs crosses over; everything the panes show is derived from these.
     return (
       <MapWorkspace
         meta={{ analysisId: analysis.id, repo, branch: analysis.branch, commit: analysis.commit_sha }}
+        repositories={analyses.map((a) => ({
+          id: a.id,
+          repo: a.project ? `${a.project.repo_owner}/${a.project.repo_name}` : "(unknown repository)",
+          branch: a.branch,
+          status: a.status,
+        }))}
         adapter={analysis.adapter}
         files={files}
         edges={edges}

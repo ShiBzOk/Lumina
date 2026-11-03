@@ -10,8 +10,9 @@ export const MAX_VISIBLE_ROWS = 8;
 const GAP_X = 140;
 const GAP_Y = 56;
 
-export function cardHeight(rows: number): number {
-  return HEADER_HEIGHT + LIST_PADDING * 2 + Math.min(rows, MAX_VISIBLE_ROWS) * ROW_HEIGHT;
+/** A compact card is its header alone. */
+export function cardHeight(rows: number, compact = false): number {
+  return compact ? HEADER_HEIGHT : HEADER_HEIGHT + LIST_PADDING * 2 + Math.min(rows, MAX_VISIBLE_ROWS) * ROW_HEIGHT;
 }
 
 export interface Point {
@@ -32,9 +33,9 @@ const byId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
  * back, layers come from the longest path, order within a layer from a few
  * barycentre sweeps.
  */
-export function layout(nodes: readonly { id: string; rows: number }[], links: readonly NodeLink[]): Map<string, Point> {
+export function layout(nodes: readonly { id: string; height: number }[], links: readonly NodeLink[]): Map<string, Point> {
   const ids = nodes.map((n) => n.id).toSorted(byId);
-  const rows = new Map(nodes.map((n) => [n.id, n.rows]));
+  const height = new Map(nodes.map((n) => [n.id, n.height]));
   const out = new Map<string, string[]>(ids.map((id) => [id, []]));
   for (const l of links) if (l.from !== l.to) out.get(l.from)?.push(l.to);
   for (const list of out.values()) list.sort(byId);
@@ -108,14 +109,14 @@ export function layout(nodes: readonly { id: string; rows: number }[], links: re
   });
 
   // Columns are stacked top to bottom and centred on a shared middle line.
-  const heights = columns.map((col) => col.reduce((h, id) => h + cardHeight(rows.get(id) ?? 0), 0) + GAP_Y * (col.length - 1));
+  const heights = columns.map((col) => col.reduce((h, id) => h + (height.get(id) ?? 0), 0) + GAP_Y * (col.length - 1));
   const tallest = Math.max(0, ...heights);
   const positions = new Map<string, Point>();
   columns.forEach((col, c) => {
     let y = (tallest - heights[c]) / 2;
     for (const id of col) {
       positions.set(id, { x: c * (CARD_WIDTH + GAP_X), y });
-      y += cardHeight(rows.get(id) ?? 0) + GAP_Y;
+      y += (height.get(id) ?? 0) + GAP_Y;
     }
   });
   return positions;
