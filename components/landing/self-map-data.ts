@@ -15,10 +15,19 @@ export const SELF_MAP = {
       {
         "id": "app",
         "label": "app",
-        "total": 5,
+        "total": 7,
         "x": 0,
         "y": 0,
         "rows": [
+          {
+            "label": "analyses/actions.ts",
+            "type": "typescript",
+            "fanIn": 4,
+            "fanOut": 8,
+            "selected": false,
+            "left": null,
+            "right": "in"
+          },
           {
             "label": "page.tsx",
             "type": "react",
@@ -31,26 +40,17 @@ export const SELF_MAP = {
         ]
       },
       {
-        "id": "app/analyses",
-        "label": "analyses",
+        "id": "app/analyses/[id]",
+        "label": "[id]",
         "total": 2,
         "x": 0,
-        "y": 180,
+        "y": 220,
         "rows": [
           {
-            "label": "[id]/page.tsx",
+            "label": "page.tsx",
             "type": "react",
             "fanIn": 0,
             "fanOut": 6,
-            "selected": false,
-            "left": null,
-            "right": "in"
-          },
-          {
-            "label": "actions.ts",
-            "type": "typescript",
-            "fanIn": 4,
-            "fanOut": 8,
             "selected": false,
             "left": null,
             "right": "in"
@@ -141,15 +141,15 @@ export const SELF_MAP = {
     ],
     "edges": [
       {
-        "d": "M340,274 C410,274 410,164 480,164",
-        "direction": "in"
-      },
-      {
         "d": "M340,314 C410,314 410,164 480,164",
         "direction": "in"
       },
       {
         "d": "M340,94 C410,94 410,164 480,164",
+        "direction": "in"
+      },
+      {
+        "d": "M340,134 C410,134 410,164 480,164",
         "direction": "in"
       },
       {
@@ -176,8 +176,8 @@ export const SELF_MAP = {
   },
   "coverage": {
     "adapter": "nextjs",
-    "found": 82,
-    "parsed": 82,
+    "found": 84,
+    "parsed": 84,
     "skipped": 0,
     "excluded": [
       {
@@ -193,10 +193,10 @@ export const SELF_MAP = {
         "count": 1
       }
     ],
-    "edges": 210,
+    "edges": 215,
     "imports": {
-      "internal": 210,
-      "external": 105,
+      "internal": 215,
+      "external": 107,
       "excluded": 0,
       "unresolved": 0
     },
@@ -208,6 +208,10 @@ export const SELF_MAP = {
       {
         "role": "page",
         "count": 5
+      },
+      {
+        "role": "fallback",
+        "count": 2
       },
       {
         "role": "hook",

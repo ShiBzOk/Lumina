@@ -119,7 +119,7 @@ function CloneForm({ autoFocus }: { autoFocus: boolean }) {
           <button
             type="submit"
             disabled={pending}
-            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3.5 text-[11px] font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-petrol px-3.5 text-[11px] font-medium text-white hover:bg-petrol/90 disabled:opacity-60"
           >
             {pending ? "Starting…" : "Map it"}
             <Icon name="arrowRight" className="size-3" />
