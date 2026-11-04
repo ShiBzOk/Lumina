@@ -6,7 +6,7 @@ import { after } from "next/server";
 import { createHash } from "node:crypto";
 import { MODEL } from "@/lib/ai/client";
 import { aggregate, explainFile, explainFolder, type FolderFile } from "@/lib/ai/explain";
-import { getAnalysis, loadGraph } from "@/lib/analyses";
+import { getAnalysis, loadFileNeighbourhood, loadStructure } from "@/lib/analyses";
 import { fold } from "@/lib/map/fold";
 import { fileAt, headCommit, parseRepoInput, type RepoRef } from "@/lib/pipeline/github";
 import { runAnalysis } from "@/lib/pipeline/run";
@@ -172,33 +172,33 @@ export async function explain(analysisId: string, subject: ExplainSubject): Prom
     }
     const repo = { owner: analysis.project.repo_owner, name: analysis.project.repo_name };
     const { commit_sha: commit, branch } = analysis;
-    const graph = await loadGraph(analysis);
     const dbs = { reader: createServerSupabase(), writer: createWriterSupabase(), orgId };
-    const labelOf = new Map(graph.labels.map((l) => [l.path, l.role]));
 
+    // A file needs only its own rows and its neighbours'. Reading the whole
+    // graph for it made every click, cached or not, cost a full map load.
     if (subject.kind === "file") {
-      const file = graph.files.find((f) => f.path === subject.path);
+      const file = await loadFileNeighbourhood(analysis, subject.path);
       if (!file) return { ok: false, error: `${subject.path} is not in this analysis` };
       if (file.kind === "asset") return { ok: false, error: "Assets aren't parsed, so there is nothing to explain from." };
-      const externals = new Set(
-        graph.imports.flatMap((r) => (r.from === file.path && r.resolution.status === "external" ? [r.specifier] : [])),
-      );
       const [result, freshness] = await Promise.all([
         explainFile(dbs, {
           repo,
           commit,
           path: file.path,
           sha256: file.sha256,
-          role: file.role ?? labelOf.get(file.path) ?? null,
-          imports: graph.edges.filter((e) => e.from === file.path).map((e) => e.to),
-          importedBy: graph.edges.filter((e) => e.to === file.path).map((e) => e.from),
-          externals: [...externals].sort(),
+          role: file.role,
+          imports: file.imports,
+          importedBy: file.importedBy,
+          externals: file.externals,
         }),
         checkFreshness(repo, branch, commit, file),
       ]);
       return { ok: true, body: result.value, cached: result.cached, model: MODEL, commit, branch, freshness };
     }
 
+    // A folder is folded from every path, but needs no import rows.
+    const graph = await loadStructure(analysis);
+    const labelOf = new Map(graph.labels.map((l) => [l.path, l.role]));
     // The same folding the map draws, over the same rows, so the folder asked about is the box clicked.
     const { nodes, nodeOf } = fold(graph.files);
     const node = nodes.find((n) => n.id === subject.id);

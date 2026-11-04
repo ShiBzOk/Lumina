@@ -32,7 +32,10 @@ interface Loaded {
   sha256: string;
 }
 
-export function parseRepository(dir: string, adapters: readonly FrameworkAdapter[] = []): ParseResult {
+/** Hears how many of the loaded files have been parsed and resolved so far. */
+export type ParseProgress = (done: number, total: number) => void;
+
+export function parseRepository(dir: string, adapters: readonly FrameworkAdapter[] = [], progress?: ParseProgress): ParseResult {
   const walk = walkRepository(dir);
   const problems = [...walk.problems];
   const adapter = selectAdapter(walk, adapters);
@@ -53,7 +56,9 @@ export function parseRepository(dir: string, adapters: readonly FrameworkAdapter
   const syntaxErrors: Coverage["syntaxErrors"] = [];
   const roles = new Map<string, string | null>();
 
+  let done = 0;
   for (const file of loaded) {
+    progress?.(done++, loaded.length);
     const source = project.createSourceFile(`/${file.rel}`, file.text, { overwrite: true });
     const found = extractImports(source);
     roles.set(file.rel, adapter.reader.read(file.rel, source));
@@ -79,6 +84,7 @@ export function parseRepository(dir: string, adapters: readonly FrameworkAdapter
       });
     }
   }
+  progress?.(done, loaded.length);
 
   // Non-code files an import resolved to become nodes too, so no edge points at nothing.
   const sourcePaths = new Set(loaded.map((f) => f.rel));

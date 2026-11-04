@@ -95,7 +95,7 @@ export async function fileAt(repo: RepoRef, ref: string, file: string): Promise<
 }
 
 /** Downloads the archive of exactly `sha`, so what is parsed is the commit recorded. */
-export async function downloadArchive(repo: RepoRef, sha: string, file: string): Promise<number> {
+export async function downloadArchive(repo: RepoRef, sha: string, file: string, received?: (bytes: number) => void): Promise<number> {
   const res = await fetch(`https://codeload.github.com/${repo.owner}/${repo.name}/tar.gz/${sha}`, {
     headers: { "User-Agent": "lumina" },
   });
@@ -109,7 +109,10 @@ export async function downloadArchive(repo: RepoRef, sha: string, file: string):
     transform(chunk: Buffer, _encoding, done) {
       bytes += chunk.length;
       if (bytes > MAX_ARCHIVE_BYTES) done(new Error(`The archive is larger than the ${mb(MAX_ARCHIVE_BYTES)} limit`));
-      else done(null, chunk);
+      else {
+        received?.(bytes);
+        done(null, chunk);
+      }
     },
   });
   await pipeline(Readable.from(chunks(res.body)), counter, fs.createWriteStream(file));

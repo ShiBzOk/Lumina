@@ -78,9 +78,13 @@ export interface StoredGraph {
   labels: { path: string; role: ModelRole }[];
 }
 
-// PostgREST returns at most 1000 rows per request. The first page also brings
-// the total, then the rest are requested together.
-const PAGE = 1000;
+// Matches the project's "Max rows" setting (Supabase → Project Settings → Data
+// API), raised from the default 1000. At 1000 a large map was dozens of
+// requests that queued behind each other; at 10000 it is a handful. If the
+// setting is ever lowered below this, a page comes back short and the count
+// check below fails the load rather than drawing part of the graph.
+// The first page also brings the total, then the rest are requested together.
+const PAGE = 10000;
 
 type Page<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null; count?: number | null }>;
 
@@ -100,14 +104,29 @@ async function readAll<T>(what: string, page: (from: number, to: number, count: 
   return rows;
 }
 
-/** The stored rows of a finished analysis, rebuilt into exactly what the parser returned. */
-export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
-  const supabase = await reader();
-  const id = analysis.id;
-  const count = (c: boolean) => (c ? ("exact" as const) : undefined);
+type Reader = Awaited<ReturnType<typeof reader>>;
+const count = (c: boolean) => (c ? ("exact" as const) : undefined);
 
-  const [fileRows, roleRows, edgeRows, importRows, routeRows] = await Promise.all([
-    readAll("files", (from, to, c) =>
+/** Files, their roles and the edges between them: what the map is drawn from. */
+export interface StoredStructure {
+  files: RepoFile[];
+  edges: Edge[];
+  labels: StoredGraph["labels"];
+}
+
+// A whole table of one analysis, with how long it took in the server log:
+// opening a large map was slow, and this says which table it was waiting on.
+async function readTable<T>(what: string, page: (from: number, to: number, count: boolean) => Page<T>): Promise<T[]> {
+  const started = performance.now();
+  const rows = await readAll(what, page);
+  const seconds = ((performance.now() - started) / 1000).toFixed(1);
+  console.log(`  ${what}: ${rows.length} rows in ${Math.max(1, Math.ceil(rows.length / PAGE))} pages, ${seconds}s`);
+  return rows;
+}
+
+async function readStructure(supabase: Reader, id: string) {
+  const [fileRows, roleRows, edgeRows] = await Promise.all([
+    readTable("files", (from, to, c) =>
       supabase
         .from("files")
         .select("id, path, folder, package, kind, line_count, bytes, content_hash, fan_in, fan_out", { count: count(c) })
@@ -116,7 +135,7 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
         .range(from, to),
     ),
     // Roles have no analysis column; they arrive through their file.
-    readAll("file roles", (from, to, c) =>
+    readTable("file roles", (from, to, c) =>
       supabase
         .from("file_roles")
         .select("file_id, role, source, file:files!inner(analysis_id)", { count: count(c) })
@@ -124,26 +143,10 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
         .order("id")
         .range(from, to),
     ),
-    readAll("edges", (from, to, c) =>
+    readTable("edges", (from, to, c) =>
       supabase
         .from("edges")
         .select("source_file_id, target_file_id, kinds, type_only", { count: count(c) })
-        .eq("analysis_id", id)
-        .order("id")
-        .range(from, to),
-    ),
-    readAll("imports", (from, to, c) =>
-      supabase
-        .from("imports")
-        .select("file_id, specifier, kind, type_only, line, status, reason, target, detail", { count: count(c) })
-        .eq("analysis_id", id)
-        .order("id")
-        .range(from, to),
-    ),
-    readAll("routes", (from, to, c) =>
-      supabase
-        .from("routes")
-        .select("file_id, method, pattern, line", { count: count(c) })
         .eq("analysis_id", id)
         .order("id")
         .range(from, to),
@@ -185,6 +188,41 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
     }))
     .sort((a, b) => compare(a.from, b.from) || compare(a.to, b.to));
 
+  const labels = roleRows
+    .filter((r) => r.source === "model")
+    .map((r) => ({ path: path(r.file_id, "file_roles.file_id"), role: member(r.role, MODEL_ROLES, "file_roles.role") }))
+    .sort((a, b) => compare(a.path, b.path));
+
+  const structure: StoredStructure = { files, edges, labels };
+  return { structure, path };
+}
+
+/** The stored rows of a finished analysis, rebuilt into exactly what the parser returned. */
+export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
+  const started = performance.now();
+  const supabase = await reader();
+  const id = analysis.id;
+
+  const [{ structure, path }, importRows, routeRows] = await Promise.all([
+    readStructure(supabase, id),
+    readTable("imports", (from, to, c) =>
+      supabase
+        .from("imports")
+        .select("file_id, specifier, kind, type_only, line, status, reason, target, detail", { count: count(c) })
+        .eq("analysis_id", id)
+        .order("id")
+        .range(from, to),
+    ),
+    readTable("routes", (from, to, c) =>
+      supabase
+        .from("routes")
+        .select("file_id, method, pattern, line", { count: count(c) })
+        .eq("analysis_id", id)
+        .order("id")
+        .range(from, to),
+    ),
+  ]);
+
   const imports: ImportRecord[] = importRows.map((r) => ({
     from: path(r.file_id, "imports.file_id"),
     specifier: r.specifier,
@@ -199,19 +237,94 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
     .map((r) => ({ file: path(r.file_id, "routes.file_id"), line: r.line, method: r.method, pattern: r.pattern }))
     .sort((a, b) => compare(a.pattern, b.pattern) || compare(a.method, b.method) || compare(a.file, b.file));
 
-  const labels = roleRows
-    .filter((r) => r.source === "model")
-    .map((r) => ({ path: path(r.file_id, "file_roles.file_id"), role: member(r.role, MODEL_ROLES, "file_roles.role") }))
-    .sort((a, b) => compare(a.path, b.path));
-
+  const seconds = ((performance.now() - started) / 1000).toFixed(1);
+  console.log(`Loaded analysis ${id}: ${structure.files.length} files, ${structure.edges.length} edges, ${imports.length} imports in ${seconds}s`);
   return {
-    files,
-    edges,
+    ...structure,
     imports,
     routes,
-    labels,
     routesWithheld: readRoutesWithheld(analysis.routes_withheld),
     coverage: readCoverage(analysis.coverage),
+  };
+}
+
+/** Files, roles and edges only: a folder's explanation needs every path but no import rows. */
+export async function loadStructure(analysis: Analysis): Promise<StoredStructure> {
+  return (await readStructure(await reader(), analysis.id)).structure;
+}
+
+/** One file and its direct neighbours, read on their own rather than out of the whole graph. */
+export interface FileNeighbourhood {
+  path: string;
+  kind: RepoFile["kind"];
+  sha256: string;
+  /** Its role, from convention or the model, whichever gave it one. */
+  role: string | null;
+  /** Files it imports, sorted by path. */
+  imports: string[];
+  /** Files that import it, sorted by path. */
+  importedBy: string[];
+  /** Package specifiers it imports, distinct and sorted. */
+  externals: string[];
+}
+
+// Sorted the way the whole graph sorts its edges, so a file's neighbours read
+// either way make the same explanation cache key.
+export async function loadFileNeighbourhood(analysis: Analysis, filePath: string): Promise<FileNeighbourhood | null> {
+  const supabase = await reader();
+  const { data: file, error } = await supabase
+    .from("files")
+    .select("id, kind, content_hash")
+    .eq("analysis_id", analysis.id)
+    .eq("path", filePath)
+    .maybeSingle();
+  if (error) throw new Error(`Could not read ${filePath}: ${error.message}`);
+  if (!file) return null;
+
+  const [roleRows, outRows, inRows, externalRows] = await Promise.all([
+    readAll("file roles", (from, to, c) =>
+      supabase.from("file_roles").select("role, source", { count: count(c) }).eq("file_id", file.id).order("id").range(from, to),
+    ),
+    readAll("edges", (from, to, c) =>
+      supabase
+        .from("edges")
+        .select("target:files!edges_target_file_id_org_id_fkey(path)", { count: count(c) })
+        .eq("source_file_id", file.id)
+        .order("id")
+        .range(from, to),
+    ),
+    readAll("edges", (from, to, c) =>
+      supabase
+        .from("edges")
+        .select("source:files!edges_source_file_id_org_id_fkey(path)", { count: count(c) })
+        .eq("target_file_id", file.id)
+        .order("id")
+        .range(from, to),
+    ),
+    readAll("imports", (from, to, c) =>
+      supabase
+        .from("imports")
+        .select("specifier", { count: count(c) })
+        .eq("file_id", file.id)
+        .eq("status", "external")
+        .order("id")
+        .range(from, to),
+    ),
+  ]);
+
+  // At most one row: a file's role is unique to it, whoever gave it.
+  const [role] = roleRows;
+  if (role && member(role.source, ["adapter", "model"] as const, "file_roles.source") === "model") {
+    member(role.role, MODEL_ROLES, "file_roles.role");
+  }
+  return {
+    path: filePath,
+    kind: member(file.kind, ["source", "asset"] as const, `files.kind of ${filePath}`),
+    sha256: file.content_hash,
+    role: role?.role ?? null,
+    imports: outRows.map((r) => r.target.path).sort(compare),
+    importedBy: inRows.map((r) => r.source.path).sort(compare),
+    externals: [...new Set(externalRows.map((r) => r.specifier))].sort(),
   };
 }
 

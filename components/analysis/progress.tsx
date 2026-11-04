@@ -4,6 +4,7 @@ import Link from "next/link";
 import { rerunAnalysis } from "@/app/analyses/actions";
 import { Icon } from "@/components/map/icons";
 import { PetrolBand } from "@/components/petrol-band";
+import { Spinner } from "@/components/spinner";
 import { sameEvent, STAGE_LABEL, STAGES, type StageEvent } from "@/lib/stages";
 import { useAnalysisStage } from "@/lib/use-analysis-stage";
 
@@ -16,8 +17,10 @@ interface ProgressProps {
   stale: boolean;
 }
 
-// Names each stage as it happens. Nothing spins: a stage is pending, current,
-// done or failed, and the current one carries the run's own message.
+// Names each stage as it happens: pending, current, done or failed, and the
+// current one carries the run's own message. The current one spins, because a
+// long stage with a still mark looks stuck; its message, which the run updates
+// with counts as it goes, is what says it isn't.
 export function AnalysisProgress({ id, repo, branch, commit, initial, stale: staleAtRender }: ProgressProps) {
   const { event, unavailable } = useAnalysisStage(id, initial);
   // Any word from the run means it is alive, whatever the server thought.
@@ -63,6 +66,16 @@ export function AnalysisProgress({ id, repo, branch, commit, initial, stale: sta
         <div className="flex-1" />
         <span className={`font-mono text-[10px] tabular-nums ${failed ? "text-danger" : "text-muted"}`}>{summary}</span>
       </header>
+
+      {/* The page refreshes into the map on its own, but reading a large
+          graph takes seconds, and "Done" alone would look like nothing more
+          is coming. */}
+      {event.status === "complete" && (
+        <p className="flex items-center gap-2 border-b border-border px-4 py-2.5 text-[11px] text-muted">
+          <Spinner className="size-3" />
+          Opening the map. A large repository takes a few seconds to read back.
+        </p>
+      )}
 
       <ol>
         {STAGES.map((stage, i) => {
@@ -142,9 +155,6 @@ function StageMark({ state }: { state: "done" | "current" | "failed" | "pending"
       </span>
     );
   }
-  return (
-    <span
-      className={`mt-px size-4 shrink-0 rounded-full border-2 ${state === "current" ? "border-petrol bg-petrol/15" : "border-border"}`}
-    />
-  );
+  if (state === "current") return <Spinner className="mt-px size-4" />;
+  return <span className="mt-px size-4 shrink-0 rounded-full border-2 border-border" />;
 }

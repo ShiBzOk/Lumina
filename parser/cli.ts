@@ -5,7 +5,9 @@ import { parseRepository } from "./parse.ts";
 import type { ParseResult, StatusCounts } from "./types.ts";
 
 const USAGE = `Usage:
-  pnpm parse <directory> [--out <file.json>]   parse a directory, print what was found, optionally write it out
+  pnpm parse <directory> [--out <file.json>] [--progress]
+                                               parse a directory, print what was found, optionally write it out;
+                                               --progress also prints "progress <done> <total>" lines as it goes
   pnpm parse --read <file.json>                read a written result back through the contract and print it`;
 
 function main(argv: string[]): number {
@@ -24,7 +26,7 @@ function main(argv: string[]): number {
   }
 
   const started = performance.now();
-  const result = parseRepository(dir, ADAPTERS);
+  const result = parseRepository(dir, ADAPTERS, argv.includes("--progress") ? progressLines() : undefined);
   const seconds = ((performance.now() - started) / 1000).toFixed(1);
   console.log(`Parsed ${result.root} in ${seconds}s (adapter: ${result.adapter})\n`);
   const status = report(result);
@@ -100,6 +102,19 @@ function row(label: string, s: StatusCounts): void {
 
 function section(title: string): void {
   console.log(`\n${title}`);
+}
+
+// With --progress, how far the parse has got goes to stdout as
+// `progress <done> <total>` lines, a few a second, for a caller to show. The
+// last one is always written, so the count ends where the parse did.
+function progressLines(): (done: number, total: number) => void {
+  let last = 0;
+  return (done, total) => {
+    const now = performance.now();
+    if (done < total && now - last < 250) return;
+    last = now;
+    process.stdout.write(`progress ${done} ${total}\n`);
+  };
 }
 
 function flag(argv: string[], name: string): string | undefined {

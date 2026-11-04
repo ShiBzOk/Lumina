@@ -32,11 +32,14 @@ Roles:
 Answer null when no role clearly fits or the file is a test, script, fixture or anything else. A missing label is better than a wrong one. Judge only from what you are shown.`;
 
 // Picking one of seven roles needs little thought, and the default effort made a
-// single batch take half a minute. Small batches so even a small repository's
-// files go out as several requests at once rather than one.
+// single batch take half a minute. Batches stay small enough that a small
+// repository's files still go out as several requests at once. A large one is
+// hundreds of batches, and the time it takes is roughly batches / CONCURRENCY
+// model calls back to back: at 10 and 4, a 4,000-file repository waited on
+// about a hundred calls in a row.
 const EFFORT = "low";
-const BATCH = 10;
-const CONCURRENCY = 4;
+const BATCH = 20;
+const CONCURRENCY = 8;
 const HEAD_LINES = 40;
 const HEAD_CHARS = 3000;
 
@@ -140,6 +143,8 @@ export async function labelFiles(
   let done = 0;
   let cached = 0;
   let next = 0;
+  // One progress write a second at most; with eight workers, one per batch was a stream of updates.
+  let reported = 0;
   const worker = async () => {
     while (next < batches.length) {
       const batch = batches[next++];
@@ -150,7 +155,10 @@ export async function labelFiles(
       });
       done += batch.length;
       cached += result.cached;
-      await progress(done, cached);
+      if (Date.now() - reported >= 1000) {
+        reported = Date.now();
+        await progress(done, cached);
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { LoadingAnalysis } from "@/components/analysis/loading";
 import { AnalysisProgress } from "@/components/analysis/progress";
 import { MapWorkspace } from "@/components/map/map-workspace";
 import { WorkspaceHeader } from "@/components/workspace-header";
@@ -14,7 +15,8 @@ export const metadata: Metadata = { title: "Analysis · Lumina" };
 // runs, its map once stored. A finished run refreshes this page into the map.
 async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["params"] }) {
   const { id } = await params;
-  const analysis = await getAnalysis(id);
+  // The repository switcher's list doesn't depend on this analysis, so it is read alongside it.
+  const [analysis, analyses] = await Promise.all([getAnalysis(id), listAnalyses()]);
   if (!analysis || !analysis.project) notFound();
   const repo = `${analysis.project.repo_owner}/${analysis.project.repo_name}`;
 
@@ -22,7 +24,7 @@ async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["param
     if (!analysis.branch || !analysis.commit_sha || !analysis.adapter) {
       throw new Error(`Analysis ${analysis.id} is complete but has no branch, commit or adapter recorded`);
     }
-    const [{ files, edges, imports, routes, routesWithheld, coverage, labels }, analyses] = await Promise.all([loadGraph(analysis), listAnalyses()]);
+    const { files, edges, imports, routes, routesWithheld, coverage, labels } = await loadGraph(analysis);
     // Only what the browser needs crosses over; everything the panes show is derived from these.
     return (
       <MapWorkspace
@@ -71,7 +73,7 @@ async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["param
 export default function AnalysisPage({ params }: PageProps<"/analyses/[id]">) {
   return (
     <PageTransition>
-      <Suspense fallback={<div className="flex flex-1 items-center justify-center text-xs text-muted">Loading analysis…</div>}>
+      <Suspense fallback={<LoadingAnalysis />}>
         <Analysis params={params} />
       </Suspense>
     </PageTransition>

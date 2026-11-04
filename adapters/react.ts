@@ -1,4 +1,4 @@
-import { Node, type SourceFile } from "ts-morph";
+import { ts, type SourceFile } from "ts-morph";
 import type { ReactRole } from "../lib/map/frameworks.ts";
 import type { FrameworkAdapter } from "../parser/adapter.ts";
 import { commonjsExports, exportedNames } from "./syntax.ts";
@@ -17,8 +17,14 @@ export function reactRole(path: string, source: SourceFile): ReactRole | null {
   // A barrel that re-exports a hook isn't one.
   const names = [...exportedNames(source).names, ...commonjsExports(source)];
   if (names.some((n) => !n.reexport && HOOK.test(n.name))) return "hook";
-  const jsx = source.getFirstDescendant((n) => Node.isJsxElement(n) || Node.isJsxSelfClosingElement(n) || Node.isJsxFragment(n));
-  return jsx ? "component" : null;
+  return hasJsx(source.compilerNode) ? "component" : null;
+}
+
+// Over the compiler's raw nodes: wrapping every node of every file as a
+// ts-morph node just to ask its kind was a large share of a big repository's parse.
+function hasJsx(node: ts.Node): boolean {
+  if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) return true;
+  return ts.forEachChild(node, (child) => (hasJsx(child) ? true : undefined)) ?? false;
 }
 
 export const reactAdapter = {

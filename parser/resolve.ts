@@ -27,6 +27,24 @@ export function createResolver(
 ): Resolver {
   const { root } = walk;
 
+  // The tree doesn't change while it is parsed, so every question asked of the
+  // disk is answered once. Without this, TypeScript's walk up through
+  // node_modules folders repeats the same stat calls for every import, which
+  // was most of a large repository's parse time.
+  const once = <T>(ask: (p: string) => T): ((p: string) => T) => {
+    const answers = new Map<string, T>();
+    return (p) => {
+      const known = answers.get(p);
+      if (known !== undefined) return known;
+      const answer = ask(p);
+      answers.set(p, answer);
+      return answer;
+    };
+  };
+  const exists = once((p) => fs.existsSync(p));
+  const fileExists = once((p) => ts.sys.fileExists(p));
+  const directoryExists = once((p) => ts.sys.directoryExists(p));
+
   const relative = (abs: string): string | null =>
     abs === root ? "." : abs.startsWith(`${root}/`) ? abs.slice(root.length + 1) : null;
   const shown = (abs: string): string => relative(abs) ?? abs;
@@ -57,20 +75,20 @@ export function createResolver(
     const rest = posix.slice(at + "/node_modules/".length);
     const name = packageName(rest);
     const dir = workspace.get(name);
-    if (!dir || fs.existsSync(posix)) return posix;
+    if (!dir || exists(posix)) return posix;
     return dir + rest.slice(name.length);
   };
 
-  const realpath = (p: string): string => {
+  const realpath = once((p: string): string => {
     try {
       return toPosix(fs.realpathSync.native(p));
     } catch {
       return toPosix(p);
     }
-  };
+  });
 
   const host: ts.ModuleResolutionHost = {
-    fileExists: (p) => ts.sys.fileExists(mapWorkspace(p)),
+    fileExists: (p) => fileExists(mapWorkspace(p)),
     readFile: (p) => ts.sys.readFile(mapWorkspace(p)),
     directoryExists: (p) => {
       const posix = toPosix(p);
@@ -79,7 +97,7 @@ export function createResolver(
         const scope = /\/node_modules\/(@[^/]+)$/.exec(posix);
         if (scope && scopes.has(scope[1])) return true;
       }
-      return ts.sys.directoryExists(mapWorkspace(posix));
+      return directoryExists(mapWorkspace(posix));
     },
     realpath: (p) => realpath(mapWorkspace(p)),
     getDirectories: (p) => ts.sys.getDirectories(mapWorkspace(p)),
@@ -208,7 +226,7 @@ export function createResolver(
 
   const installed = (fromAbs: string, name: string): boolean => {
     for (let dir = path.posix.dirname(fromAbs); relative(dir) !== null; dir = path.posix.dirname(dir)) {
-      if (fs.existsSync(`${dir}/node_modules/${name}`)) return true;
+      if (exists(`${dir}/node_modules/${name}`)) return true;
       if (dir === root) break;
     }
     return false;

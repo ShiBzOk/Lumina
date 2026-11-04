@@ -23,7 +23,7 @@ export interface RunRequest {
   attempt: number;
 }
 
-// The parser reports nothing while it works, so its deadline sits below the
+// A parser that hangs stops reporting progress, so its deadline sits below the
 // ten minutes after which a silent run counts as stale and may be re-run.
 const PARSE_DEADLINE_MS = 8 * 60 * 1000;
 
@@ -48,9 +48,40 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
     if (error) throw new Error(`Could not update the analysis: ${error.message}`);
     if (data.length === 0) throw new Superseded();
   };
+  // One line per stage in the server log, so a slow run says where its time went.
+  let stageStarted = performance.now();
+  const timed = (finished: string) => {
+    const now = performance.now();
+    console.log(`Analysis ${analysisId} (${slug}): ${finished} took ${((now - stageStarted) / 1000).toFixed(1)}s`);
+    stageStarted = now;
+  };
   const enter = (next: AnalysisStage, message: string) => {
+    if (next !== stage) timed(stage);
     stage = next;
     return update({ status: "running", stage: next, stage_message: message });
+  };
+  // Progress from inside a long stage, so the page shows it moving rather
+  // than one message that might be stuck. Written at most once a second and
+  // in order. A write that fails, a superseded run included, stops further
+  // writes, and the stage throws it when it calls `settle`.
+  const live = () => {
+    let last = 0;
+    let chain = Promise.resolve();
+    let failure: { error: unknown } | null = null;
+    return {
+      say(message: string) {
+        const now = Date.now();
+        if (failure || now - last < 1000) return;
+        last = now;
+        chain = chain.then(() => update({ stage_message: message })).catch((error: unknown) => {
+          failure ??= { error };
+        });
+      },
+      async settle() {
+        await chain;
+        if (failure) throw failure.error;
+      },
+    };
   };
 
   try {
@@ -58,26 +89,30 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
     // A re-run starts from nothing: rows from the previous run would otherwise
     // sit beside the new ones. Edges, imports and roles go with their files.
     // Only earlier attempts' files, so a run that lost its claim can't clear its successor's.
-    {
-      const { error } = await db.from("files").delete().eq("analysis_id", analysisId).lt("attempt", attempt);
-      if (error) throw new Error(`Could not clear the previous run's files: ${error.message}`);
-    }
-    for (const table of ["insights", "routes"] as const) {
-      const { error } = await db.from(table).delete().eq("analysis_id", analysisId);
+    // The three clears and the GitHub lookup don't depend on each other, so they go together.
+    const clear = async (table: string, run: PromiseLike<{ error: { message: string } | null }>) => {
+      const { error } = await run;
       if (error) throw new Error(`Could not clear the previous run's ${table}: ${error.message}`);
-    }
-
-    const commit = await resolveCommit(repo, request.branch);
+    };
+    const [commit] = await Promise.all([
+      resolveCommit(repo, request.branch),
+      clear("files", db.from("files").delete().eq("analysis_id", analysisId).lt("attempt", attempt)),
+      clear("insights", db.from("insights").delete().eq("analysis_id", analysisId)),
+      clear("routes", db.from("routes").delete().eq("analysis_id", analysisId)),
+    ]);
     await update({ branch: commit.branch, commit_sha: commit.sha });
     {
       const { error } = await db.from("projects").update({ description: commit.description }).eq("id", request.projectId);
       if (error) throw new Error(`Could not record the description: ${error.message}`);
     }
-    await enter("fetching", `Downloading ${slug}@${commit.sha.slice(0, 7)} (${commit.branch})`);
+    const downloading = `Downloading ${slug}@${commit.sha.slice(0, 7)} (${commit.branch})`;
+    await enter("fetching", downloading);
     const archive = path.join(work, "archive.tar.gz");
-    const bytes = await downloadArchive(repo, commit.sha, archive);
+    const download = live();
+    const bytes = await downloadArchive(repo, commit.sha, archive, (received) => download.say(`${downloading}: ${size(received)}`));
+    await download.settle();
 
-    await enter("selecting", `Extracting ${bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`} archive`);
+    await enter("selecting", `Extracting ${size(bytes)} archive`);
     const dir = path.join(work, "repo");
     await fs.mkdir(dir);
     const selection = await selectFiles(archive, dir);
@@ -89,7 +124,11 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
     );
 
     await enter("parsing", `Resolving imports across ${formatCount(selection.files)} files`);
-    const result = await parse(dir, path.join(work, "result.json"));
+    const parsing = live();
+    const result = await parse(dir, path.join(work, "result.json"), (done, total) =>
+      parsing.say(`Parsed ${formatCount(done)} of ${formatCount(total)} files, resolving their imports`),
+    );
+    await parsing.settle();
     // Nothing to draw is not a finished map. Without this, a repository in
     // another language would complete as an empty canvas that looks whole.
     if (result.coverage.filesFound === 0) throw new Error(noSourceFiles(selection.extensions));
@@ -121,6 +160,7 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
       if (error) throw new Error(`Could not store labels: ${error.message}`);
     }
 
+    timed(stage);
     await update({
       status: "complete",
       stage: null,
@@ -174,6 +214,10 @@ async function labelInputs(dir: string, result: ParseResult): Promise<LabelInput
   return inputs;
 }
 
+function size(bytes: number): string {
+  return bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 // Names what the repository does hold, from the files actually extracted.
 function noSourceFiles(extensions: Map<string, number>): string {
   const counts = [...extensions].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
@@ -186,15 +230,26 @@ function noSourceFiles(extensions: Map<string, number>): string {
 // The parser runs as its own process, exactly as it does from the terminal.
 // It stays standalone, its CPU-bound work doesn't stall the server, and its
 // output comes back through the contract reader like any other result.
-async function parse(dir: string, out: string): Promise<ParseResult> {
+// Its stdout is read only for the `progress <done> <total>` lines --progress adds.
+async function parse(dir: string, out: string, progress: (done: number, total: number) => void): Promise<ParseResult> {
   const cli = path.join(process.cwd(), "parser", "cli.ts");
   let timedOut = false;
   const { code, stderr } = await new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
-    const child = spawn(process.execPath, [cli, dir, "--out", out], { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(process.execPath, [cli, dir, "--out", out, "--progress"], { stdio: ["ignore", "pipe", "pipe"] });
     const deadline = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
     }, PARSE_DEADLINE_MS);
+    let partial = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      const lines = (partial + chunk).split("\n");
+      partial = lines.pop() ?? "";
+      for (const line of lines) {
+        const match = /^progress (\d+) (\d+)$/.exec(line);
+        if (match) progress(Number(match[1]), Number(match[2]));
+      }
+    });
     let stderr = "";
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {

@@ -1,4 +1,4 @@
-import { Node, SyntaxKind, type SourceFile } from "ts-morph";
+import { Node, SyntaxKind, createWrappedNode, ts, type SourceFile } from "ts-morph";
 import type { ImportKind } from "./types.ts";
 
 export interface FoundImport {
@@ -18,10 +18,21 @@ export interface Extraction {
 
 // Walks every node rather than only top-level statements, so imports inside
 // `declare module` blocks and dynamic imports anywhere in a function are seen.
+//
+// The walk itself is over the compiler's raw nodes, and only the few kinds that
+// can be an import are wrapped as ts-morph nodes. Wrapping every node made
+// this walk, and forgetting those wrappers afterwards, a large share of a big
+// repository's parse time. What is read off each import is unchanged.
 export function extractImports(file: SourceFile): Extraction {
   const imports: FoundImport[] = [];
+  const raw = file.compilerNode;
 
-  file.forEachDescendant((node) => {
+  const visit = (compiler: ts.Node): void => {
+    if (mayImport(compiler, raw)) inspect(createWrappedNode(compiler, { sourceFile: raw }));
+    ts.forEachChild(compiler, visit);
+  };
+
+  const inspect = (node: Node): void => {
     if (Node.isImportDeclaration(node)) {
       const named = node.getNamedImports();
       const typeOnly =
@@ -67,9 +78,21 @@ export function extractImports(file: SourceFile): Extraction {
         imports.push(callArgument(node.getArguments(), "require", node.getStartLineNumber()));
       }
     }
-  });
+  };
 
+  ts.forEachChild(raw, visit);
   return { imports, syntaxErrors: syntaxErrorCount(file) };
+}
+
+// Calls are everywhere; only `import(...)` and a bare `require(...)` are worth wrapping.
+function mayImport(node: ts.Node, source: ts.SourceFile): boolean {
+  if (ts.isCallExpression(node)) {
+    const callee = node.expression;
+    return callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && callee.getText(source) === "require");
+  }
+  return (
+    ts.isImportDeclaration(node) || ts.isExportDeclaration(node) || ts.isImportTypeNode(node) || ts.isImportEqualsDeclaration(node)
+  );
 }
 
 // The first argument names the module only when it is a string literal.
