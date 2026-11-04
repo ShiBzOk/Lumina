@@ -5,12 +5,16 @@ const isPublic = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)"]);
 const isOnboarding = createRouteMatcher(["/onboarding"]);
 
 // Decided here, before any page renders, so a signed-out request never
-// receives page HTML. Everything that isn't sign-in or sign-up is protected.
+// receives page HTML. Everything that isn't sign-in or sign-up is protected,
+// except `/` itself, which signed out is the landing page.
 export default clerkMiddleware(async (auth, req) => {
   if (isPublic(req)) return;
 
   const { userId, orgId, redirectToSignIn } = await auth();
-  if (!userId) return redirectToSignIn({ returnBackUrl: req.url });
+  if (!userId) {
+    if (req.nextUrl.pathname === "/") return;
+    return redirectToSignIn({ returnBackUrl: req.url });
+  }
 
   // Every screen past sign-in belongs to an organization. A token without one
   // goes to onboarding, which activates or creates one.

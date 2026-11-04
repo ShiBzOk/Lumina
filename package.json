@@ -9,7 +9,8 @@
     "lint": "eslint",
     "parse": "node parser/cli.ts",
     "check:map": "node scripts/check-map.ts",
-    "check:insights": "node scripts/check-insights.ts"
+    "check:insights": "node scripts/check-insights.ts",
+    "landing:map": "node scripts/landing-map.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.23",

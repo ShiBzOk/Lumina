@@ -2,6 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { ActivateOrganization } from "./activate-organization";
+import { PageTransition } from "@/components/page-transition";
 
 // The one place the app calls Clerk's API: a token with no organization in it.
 // After activation the organization travels in the token and nothing else asks.
@@ -36,10 +37,12 @@ async function Onboarding() {
 
 export default function OnboardingPage() {
   return (
-    <main className="flex flex-1 items-center justify-center text-xs text-muted">
-      <Suspense fallback={<p>Preparing workspace…</p>}>
-        <Onboarding />
-      </Suspense>
-    </main>
+    <PageTransition>
+      <main className="flex flex-1 items-center justify-center text-xs text-muted">
+        <Suspense fallback={<p>Preparing workspace…</p>}>
+          <Onboarding />
+        </Suspense>
+      </main>
+    </PageTransition>
   );
 }

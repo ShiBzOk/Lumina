@@ -55,3 +55,67 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
+/* The landing page's one movement: a section rises into place the first time
+   it's scrolled to. Under reduced motion the spring is 1ms, so it just appears. */
+.reveal {
+  transition:
+    opacity calc(var(--spring-duration) * 1.6) var(--spring),
+    translate calc(var(--spring-duration) * 1.6) var(--spring);
+}
+.reveal[data-reveal="waiting"] {
+  opacity: 0;
+  translate: 0 12px;
+}
+
+/* Between pages: the old page fades out quickly, the new one rises a few
+   pixels as it fades in, starting once the old one has mostly gone. Short and
+   small, because it happens on every click. */
+::view-transition-old(.page-exit) {
+  animation: 140ms ease-in both page-fade reverse;
+}
+::view-transition-new(.page-enter) {
+  animation:
+    260ms ease-out 90ms both page-fade,
+    var(--spring-duration) var(--spring) 90ms both page-rise;
+}
+@keyframes page-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes page-rise {
+  from {
+    translate: 0 8px;
+  }
+}
+
+/* FAQ answers open and close by height, then fade in. Browsers without
+   ::details-content just show and hide them, which is fine. */
+.faq {
+  interpolate-size: allow-keywords;
+}
+.faq::details-content {
+  block-size: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    block-size var(--spring-duration) var(--spring),
+    opacity 200ms ease-out,
+    content-visibility var(--spring-duration) allow-discrete;
+}
+.faq[open]::details-content {
+  block-size: auto;
+  opacity: 1;
+}
+.faq-icon {
+  transition: rotate var(--spring-duration) var(--spring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

@@ -6,6 +6,7 @@ import { MapWorkspace } from "@/components/map/map-workspace";
 import { WorkspaceHeader } from "@/components/workspace-header";
 import { MODEL, tracing } from "@/lib/ai/client";
 import { getAnalysis, listAnalyses, loadGraph } from "@/lib/analyses";
+import { PageTransition } from "@/components/page-transition";
 
 export const metadata: Metadata = { title: "Analysis · Lumina" };
 
@@ -69,8 +70,10 @@ async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["param
 
 export default function AnalysisPage({ params }: PageProps<"/analyses/[id]">) {
   return (
-    <Suspense fallback={<div className="flex flex-1 items-center justify-center text-xs text-muted">Loading analysis…</div>}>
-      <Analysis params={params} />
-    </Suspense>
+    <PageTransition>
+      <Suspense fallback={<div className="flex flex-1 items-center justify-center text-xs text-muted">Loading analysis…</div>}>
+        <Analysis params={params} />
+      </Suspense>
+    </PageTransition>
   );
 }
