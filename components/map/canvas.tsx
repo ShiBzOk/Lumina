@@ -371,7 +371,11 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
     // The hovered file's own connections, drawn last so nothing crosses them.
     const top: ReactNode[] = [];
     const hoveredPath = hovered?.kind === "file" ? hovered.path : null;
-    // Header to header, many file links between two folders are one curve; draw it once.
+    // Links that meet the same two points draw the same curve: every file whose
+    // row is scrolled out of view meets its card's header, and on a compact map
+    // every link between two folders runs header to header. Each curve is drawn
+    // once, because hundreds of stacked copies look identical and cost the
+    // browser a repaint each, every frame of a pan or zoom.
     const drawn = new Set<string>();
     map.edges.forEach((e, i) => {
       const a = positions.get(e.fromNode);
@@ -388,16 +392,23 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
       // A compact card shows no files, so a link inside one folder would loop
       // from its header back to the same point: a stub that goes nowhere.
       if (compact && e.fromNode === e.toNode) return;
-      if (compact) {
-        const key = `${e.fromNode}>${e.toNode}>${direction ?? ""}`;
-        if (drawn.has(key)) return;
-        drawn.add(key);
+
+      // Coloured as a click would colour it, relative to the hovered file.
+      const towards = hot ? (e.from === hoveredPath ? "out" : "in") : null;
+      let opacity = 0;
+      if (!towards && !direction) {
+        const from = rowsByPath.get(e.from);
+        const to = rowsByPath.get(e.to);
+        const filteredOut = filtering && (!from || !to || !matches(from, filter) || !matches(to, filter));
+        opacity = highlight ? 0.18 : filteredOut ? 0.2 : 0.9;
       }
+      const look = towards ? `hot-${towards}` : direction ? `lit-${direction}` : `quiet-${opacity}`;
+      const key = `${e.fromNode}:${fromSlot}>${e.toNode}:${toSlot}>${look}`;
+      if (drawn.has(key)) return;
+      drawn.add(key);
       const d = edgePath(a, b, fromSlot, toSlot, e.fromNode === e.toNode);
 
-      if (hot) {
-        // Coloured as a click would colour it, relative to the hovered file.
-        const towards = e.from === hoveredPath ? "out" : "in";
+      if (towards) {
         top.push(<path key={i} data-edge={i} d={d} stroke={DIRECTION_COLOR[towards]} strokeWidth={3} fill="none" />);
         return;
       }
@@ -405,10 +416,6 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
         lit.push(<path key={i} data-edge={i} d={d} stroke={DIRECTION_COLOR[direction]} strokeWidth={2.5} fill="none" />);
         return;
       }
-      const from = rowsByPath.get(e.from);
-      const to = rowsByPath.get(e.to);
-      const filteredOut = filtering && (!from || !to || !matches(from, filter) || !matches(to, filter));
-      const opacity = highlight ? 0.18 : filteredOut ? 0.2 : 0.9;
       quiet.push(<path key={i} data-edge={i} d={d} stroke="var(--edge)" strokeWidth={1} strokeOpacity={opacity} fill="none" className="transition-[stroke-opacity] duration-150" />);
     });
     return [...quiet, ...lit, ...top];
@@ -465,6 +472,8 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
         backgroundSize: "24px 24px",
       }}
     >
+      {/* No will-change here: it freezes the layer's pixels at the zoom it was
+          painted at, and every card's text blurs once you zoom past it. */}
       <div
         className="absolute top-0 left-0 origin-top-left transition-opacity duration-300 ease-out starting:opacity-0"
         style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})` }}
@@ -511,10 +520,15 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
           size={size}
           lit={highlight?.nodes ?? null}
           compact={compact}
-          // Follows the pointer as it drags, so never glides.
+          // A click glides there, like the other buttons that move the view.
           onCenter={(x, y) => {
+            const k = (glide.current?.to ?? viewport).k;
+            glideTo({ k, x: size.w / 2 - x * k, y: size.h / 2 - y * k });
+          }}
+          // A drag follows the hand, so never glides.
+          onPan={(dx, dy) => {
             stopGlide();
-            setViewport((v) => ({ ...v, x: size.w / 2 - x * v.k, y: size.h / 2 - y * v.k }));
+            setViewport((v) => ({ ...v, x: v.x - dx * v.k, y: v.y - dy * v.k }));
           }}
         />
       </div>

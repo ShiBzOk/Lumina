@@ -68,6 +68,134 @@ body {
   translate: 0 12px;
 }
 
+/* The hero's opening, played once on load and never again. All CSS, so it
+   runs before hydration. Every animation's final frame is the element's
+   resting state, so with reduced motion (animations off) the hero is simply
+   there: the glow behind the headline, the words sharp, the window open. */
+
+/* A warm glow that crosses the artwork from the left and settles behind the
+   headline. Screen-blended so it lifts the petrol rather than greying it. */
+.hero-light {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: min(80%, 900px);
+  height: 560px;
+  translate: -50% 0;
+  background: radial-gradient(closest-side, rgb(255 236 210 / 0.28), rgb(255 236 210 / 0.1) 50%, transparent);
+  mix-blend-mode: screen;
+  pointer-events: none;
+  animation: hero-light 1800ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes hero-light {
+  from {
+    translate: -140% 0;
+    opacity: 0;
+  }
+}
+
+/* Each headline word sharpens from a blur, then catches the light: a warm
+   halo flares as the glow reaches it, left to right, and stays on faintly.
+   The resting halo is the base style, so reduced motion shows it too. Two
+   delays per word, set inline, one for each animation. */
+.hero-word {
+  display: inline-block;
+  text-shadow: 0 0 24px rgb(255 226 190 / 0.35);
+  animation:
+    hero-word 800ms cubic-bezier(0.2, 0.7, 0.2, 1) both,
+    hero-lit 1100ms ease-out both;
+}
+@keyframes hero-word {
+  from {
+    opacity: 0;
+    filter: blur(12px);
+  }
+}
+@keyframes hero-lit {
+  from {
+    text-shadow: 0 0 24px rgb(255 226 190 / 0);
+  }
+  35% {
+    text-shadow: 0 0 28px rgb(255 226 190 / 0.9);
+  }
+}
+
+/* The window rises into place after the headline, already lying back. */
+.hero-rise {
+  animation: hero-rise 1000ms cubic-bezier(0.16, 1, 0.3, 1) 900ms backwards;
+}
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    translate: 0 60px;
+  }
+}
+.hero-after {
+  animation: hero-fade 400ms ease-out 1500ms backwards;
+}
+@keyframes hero-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Turned a little to the side, as if the screen were angled towards you. */
+.hero-stage {
+  perspective: 1800px;
+}
+/* --lean-y and --lean-x are degrees added by HeroWindow as the window leans
+   towards the cursor; unset (touch, reduced motion, no script) it rests here. */
+.hero-tilt {
+  transform: rotateY(calc(-12deg + var(--lean-y, 0) * 1deg)) rotateX(calc(5deg + var(--lean-x, 0) * 1deg));
+}
+
+/* A strip of light that runs round the frame for as long as the page is open:
+   a narrow bright arc in a conic gradient, turned by an animated angle. The
+   angle is registered so it can be animated, and inherited so the halo and
+   the line turn together. Teal into warm light: the petrol brand lit up, and
+   still visible against the cream the window sits on. */
+@property --strip-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+.hero-tilt {
+  animation: hero-strip 5s linear infinite;
+}
+@keyframes hero-strip {
+  to {
+    --strip-angle: 360deg;
+  }
+}
+.hero-strip {
+  background: conic-gradient(
+    from var(--strip-angle),
+    transparent 0%,
+    transparent 62%,
+    rgb(45 212 191 / 0.9) 78%,
+    rgb(255 228 190) 88%,
+    transparent 96%,
+    transparent 100%
+  );
+}
+.hero-strip-glow {
+  filter: blur(18px);
+  opacity: 0.8;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-tilt {
+    animation: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-light,
+  .hero-word,
+  .hero-rise,
+  .hero-after {
+    animation: none;
+  }
+}
+
 /* Between pages: the old page fades out quickly, the new one rises a few
    pixels as it fades in, starting once the old one has mostly gone. Short and
    small, because it happens on every click. */

@@ -7,14 +7,17 @@ import { Icon, type IconName } from "@/components/map/icons";
 export function Menu({
   icon,
   label,
+  defaultOpen = false,
   children,
 }: {
   icon: IconName;
   /** What the button says: the thing currently chosen. */
   label: ReactNode;
+  /** Open when first shown, for a page arrived at specifically to use this menu. */
+  defaultOpen?: boolean;
   children: (close: () => void) => ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

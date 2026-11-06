@@ -1,8 +1,8 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Logo } from "@/components/logo";
+import { HeroWindow } from "./hero-window";
 import { Reveal } from "./reveal";
-import { SelfMap } from "./self-map";
 import { SELF_MAP } from "./self-map-data";
 
 // The front door, for signed-out visitors only. Every claim on it is something
@@ -20,6 +20,8 @@ const PRINCIPLES = [
   { title: "Absent beats approximate.", body: "What can't be recovered is left out and counted, never filled in." },
   { title: "Explains, never grades.", body: "It tells you how the code fits together. Judging it is up to you." },
 ];
+
+const HEADLINE = "See how your code connects.";
 
 const FRAMEWORKS = ["Next.js", "NestJS", "Express", "React"];
 
@@ -83,7 +85,7 @@ export function Landing() {
         <Reveal>
           <SectionHead eyebrow="Run on itself" title="Here's what it found in Lumina." />
           <p className="mt-4 max-w-lg text-[13px] leading-relaxed text-muted">
-            The same parse that drew the map above. Every file is accounted for, and anything left out says why.
+            The same parse any repository gets. Every file is accounted for, and anything left out says why.
           </p>
           <SelfCoverage />
         </Reveal>
@@ -180,6 +182,8 @@ function Hero() {
       {/* The login artwork, stretched rather than cropped, so it runs petrol to cream whatever the height. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/auth/petrol-band.svg" alt="" className="absolute inset-0 size-full" />
+      {/* Lumina is light: a soft glow crosses the artwork once and comes to rest behind the headline. */}
+      <div className="hero-light" aria-hidden />
 
       <div className="relative mx-auto flex w-full max-w-5xl flex-col px-4 pt-6 sm:px-6">
         <nav className="flex items-center justify-between text-white">
@@ -201,7 +205,16 @@ function Hero() {
             <span className="h-px w-10 bg-white/50" aria-hidden />
           </p>
           <h1 className="mt-7 max-w-3xl text-5xl leading-[1.02] font-semibold tracking-[-0.04em] text-white sm:text-7xl">
-            See how your code connects.
+            {/* Each word comes into focus in turn, so the line reads as it sharpens. */}
+            {/* The space sits outside each word: inside an inline-block it would be trimmed. */}
+            {HEADLINE.split(" ").map((word, i) => (
+              <Fragment key={word}>
+                {i > 0 && " "}
+                <span className="hero-word" style={{ animationDelay: `${200 + i * 90}ms, ${600 + i * 120}ms` }}>
+                  {word}
+                </span>
+              </Fragment>
+            ))}
           </h1>
           <p className="mt-6 max-w-md text-[15px] leading-relaxed text-white/70">
             Point Lumina at a public GitHub repository. Every import is parsed, and every line on the map is one the code
@@ -210,11 +223,11 @@ function Hero() {
           <CtaButton className="mt-10" />
         </div>
 
-        {/* The map sits over the artwork's cream bottom edge, the same way the signed-in screens float their cards. */}
+        {/* The app itself, floating over the artwork's cream bottom edge the way the signed-in screens float their cards. */}
         <div className="pb-6 sm:pb-10">
-          <SelfMap />
-          <p className="mt-4 text-center text-[12px] text-petrol/70">
-            Lumina, mapped by Lumina, with one file selected: green flows in, orange flows out.
+          <HeroWindow />
+          <p className="hero-after mt-4 text-center text-[12px] text-petrol/70">
+            vercel/commerce, mapped by Lumina, with one folder selected: green flows in, orange flows out.
           </p>
         </div>
       </div>
