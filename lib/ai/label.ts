@@ -1,6 +1,9 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { MODEL_ROLES, type ModelRole } from "@/lib/map/frameworks";
+import type { ParseResult, RepoFile } from "@/parser/types";
 import { ai, cacheKey, cachedBatch, MODEL } from "./client";
 
 // Roles for files no adapter could identify. The model only labels: it sees a
@@ -53,6 +56,33 @@ export function headOf(text: string): string {
     .slice(0, HEAD_CHARS);
 }
 
+/**
+ * What the labeller is shown for each file `keep` accepts, read from the
+ * extracted copy, which is exactly the commit that was parsed. The pipeline
+ * keeps files convention said nothing about; the role-accuracy eval keeps the
+ * ones it did, and builds their inputs here so both ask the same question.
+ */
+export async function labelInputs(dir: string, result: ParseResult, keep: (f: RepoFile) => boolean): Promise<LabelInput[]> {
+  const imports = Map.groupBy(result.edges, (e) => e.from);
+  const externals = Map.groupBy(
+    result.imports.filter((r) => r.resolution.status === "external"),
+    (r) => r.from,
+  );
+  const inputs: LabelInput[] = [];
+  // One at a time: a large repository would otherwise open every file at once.
+  for (const f of result.files) {
+    if (!keep(f)) continue;
+    inputs.push({
+      path: f.path,
+      sha256: f.sha256,
+      head: headOf(await fs.readFile(path.join(dir, f.path), "utf8")),
+      imports: (imports.get(f.path) ?? []).map((e) => e.to),
+      externals: [...new Set((externals.get(f.path) ?? []).map((r) => r.specifier))].sort(),
+    });
+  }
+  return inputs;
+}
+
 type Db = SupabaseClient<Database>;
 type Answer = ModelRole | null;
 
@@ -69,53 +99,7 @@ function batchLabeller(db: Db, orgId: string) {
       const byKey = new Map(data.map((r) => [r.key, r.role === null ? null : role(r.role, "cached label")]));
       return keys.map((k) => byKey.get(k));
     },
-    async generate(misses) {
-      // Ids rather than paths as property names, so no path can upset the schema.
-      const ids = misses.map((_, i) => `f${i}`);
-      const completion = await ai.chat.completions.create({
-        model: MODEL,
-        reasoning_effort: EFFORT,
-        messages: [
-          { role: "developer", content: PROMPT },
-          {
-            role: "user",
-            content: misses
-              .map((f, i) =>
-                [
-                  `### ${ids[i]}: ${f.path}`,
-                  `Imports from the repository: ${f.imports.length > 0 ? f.imports.join(", ") : "none"}`,
-                  `Imports from packages: ${f.externals.length > 0 ? f.externals.join(", ") : "none"}`,
-                  "First lines:",
-                  f.head,
-                ].join("\n"),
-              )
-              .join("\n\n"),
-          },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "roles",
-            strict: true,
-            schema: {
-              type: "object",
-              properties: Object.fromEntries(ids.map((id) => [id, { anyOf: [{ type: "string", enum: MODEL_ROLES }, { type: "null" }] }])),
-              required: ids,
-              additionalProperties: false,
-            },
-          },
-        },
-      });
-      const content = completion.choices[0]?.message.content;
-      if (!content) throw new Error(`The model returned no labels (finish reason: ${completion.choices[0]?.finish_reason ?? "none"})`);
-      const parsed: unknown = JSON.parse(content);
-      if (typeof parsed !== "object" || parsed === null) throw new Error("The model's labels are not an object");
-      return ids.map((id) => {
-        const value: unknown = Reflect.get(parsed, id);
-        if (value === undefined) throw new Error(`The model left ${id} unlabelled`);
-        return value === null ? null : role(value, "the model's label");
-      });
-    },
+    generate: askRoles,
     async write(misses, values) {
       const { error } = await db
         .from("role_labels")
@@ -125,6 +109,59 @@ function batchLabeller(db: Db, orgId: string) {
         );
       if (error) throw new Error(`Could not cache labels: ${error.message}`);
     },
+  });
+}
+
+/**
+ * One model call for a batch of files, with no cache: the labeller wraps it
+ * with one, and the role-accuracy eval calls it bare, so the eval asks exactly
+ * what the pipeline asks.
+ */
+export async function askRoles(misses: readonly LabelInput[]): Promise<Answer[]> {
+  // Ids rather than paths as property names, so no path can upset the schema.
+  const ids = misses.map((_, i) => `f${i}`);
+  const completion = await ai.chat.completions.create({
+    model: MODEL,
+    reasoning_effort: EFFORT,
+    messages: [
+      { role: "developer", content: PROMPT },
+      {
+        role: "user",
+        content: misses
+          .map((f, i) =>
+            [
+              `### ${ids[i]}: ${f.path}`,
+              `Imports from the repository: ${f.imports.length > 0 ? f.imports.join(", ") : "none"}`,
+              `Imports from packages: ${f.externals.length > 0 ? f.externals.join(", ") : "none"}`,
+              "First lines:",
+              f.head,
+            ].join("\n"),
+          )
+          .join("\n\n"),
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "roles",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: Object.fromEntries(ids.map((id) => [id, { anyOf: [{ type: "string", enum: MODEL_ROLES }, { type: "null" }] }])),
+          required: ids,
+          additionalProperties: false,
+        },
+      },
+    },
+  });
+  const content = completion.choices[0]?.message.content;
+  if (!content) throw new Error(`The model returned no labels (finish reason: ${completion.choices[0]?.finish_reason ?? "none"})`);
+  const parsed: unknown = JSON.parse(content);
+  if (typeof parsed !== "object" || parsed === null) throw new Error("The model's labels are not an object");
+  return ids.map((id) => {
+    const value: unknown = Reflect.get(parsed, id);
+    if (value === undefined) throw new Error(`The model left ${id} unlabelled`);
+    return value === null ? null : role(value, "the model's label");
   });
 }
 

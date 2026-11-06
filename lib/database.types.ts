@@ -162,6 +162,7 @@ export type Database = {
           key: string
           model: string
           org_id: string
+          removed_sentences: number
         }
         Insert: {
           body: string
@@ -170,6 +171,7 @@ export type Database = {
           key: string
           model: string
           org_id: string
+          removed_sentences?: number
         }
         Update: {
           body?: string
@@ -178,6 +180,7 @@ export type Database = {
           key?: string
           model?: string
           org_id?: string
+          removed_sentences?: number
         }
         Relationships: [
           {

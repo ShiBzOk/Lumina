@@ -154,7 +154,17 @@ export type Freshness =
   | { state: "unknown"; reason: string };
 
 export type ExplainResult =
-  | { ok: true; body: string; cached: boolean; model: string; commit: string; branch: string; freshness: Freshness }
+  | {
+      ok: true;
+      body: string;
+      /** Sentences the pass after the model removed because they named a file it wasn't shown. */
+      removedSentences: number;
+      cached: boolean;
+      model: string;
+      commit: string;
+      branch: string;
+      freshness: Freshness;
+    }
   | { ok: false; error: string };
 
 /**
@@ -193,7 +203,7 @@ export async function explain(analysisId: string, subject: ExplainSubject): Prom
         }),
         checkFreshness(repo, branch, commit, file),
       ]);
-      return { ok: true, body: result.value, cached: result.cached, model: MODEL, commit, branch, freshness };
+      return { ok: true, ...result.value, cached: result.cached, model: MODEL, commit, branch, freshness };
     }
 
     // A folder is folded from every path, but needs no import rows.
@@ -225,7 +235,7 @@ export async function explain(analysisId: string, subject: ExplainSubject): Prom
       explainFolder(dbs, { repo, folder: node.id, files, importsFrom: aggregate(importsFrom), internal }),
       checkFreshness(repo, branch, commit, null),
     ]);
-    return { ok: true, body: result.value, cached: result.cached, model: MODEL, commit, branch, freshness };
+    return { ok: true, ...result.value, cached: result.cached, model: MODEL, commit, branch, freshness };
   } catch (error) {
     // Returned rather than thrown: a thrown message is hidden in production, and this one is the user's to read.
     return { ok: false, error: error instanceof Error ? error.message : String(error) };

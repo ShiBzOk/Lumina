@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { fileAt, type RepoRef } from "@/lib/pipeline/github";
-import { ai, cacheKey, cachedCall, MODEL, type Cached } from "./client";
+import { ai, cacheKey, cachedCall, MODEL, scoreCurrentRun, type Cached } from "./client";
+import { inventedPaths, repairPaths } from "./invented-paths";
 
 // The model explains what the parser found. Every path it sees is handed to
 // it from the stored graph, and it is told the lists are complete, so there is
@@ -16,7 +17,8 @@ type Db = SupabaseClient<Database>;
 // paragraphs into labelled fragments.
 const FORMAT = `Formatting: plain paragraphs. Only three kinds of markup are allowed: inline code in single backticks, bullet lines starting with "- ", and bold in double asterisks. No headings, tables, numbered lists, italics or links. Write every repository path in full, exactly as given, inside inline code, and name only paths you were given.`;
 
-const FILE_PROMPT = `You explain one file of a TypeScript or JavaScript repository to a developer reading a map of its dependencies.
+/** Exported for the prompt-version evals, which run it beside the prompt it replaced. */
+export const FILE_PROMPT = `You explain one file of a TypeScript or JavaScript repository to a developer reading a map of its dependencies.
 
 Say what the file does and the part it plays among the files around it: what it takes from the files it imports, and what the files importing it use it for. The neighbour lists come from a parser and are complete. Don't add connections that aren't listed, and don't speculate about files you weren't shown.
 
@@ -69,11 +71,21 @@ export interface FolderSubject {
   internal: number;
 }
 
+// Bumped when the pass after the model changes what is stored, so answers
+// cached before it existed aren't served as if they had been through it.
+const REPAIR = 1;
+
 // The file's content hash stands in for its source, so a hit needs no fetch.
 const fileKey = (s: FileSubject) =>
-  cacheKey({ prompt: FILE_PROMPT, path: s.path, sha256: s.sha256, role: s.role, imports: s.imports, importedBy: s.importedBy, externals: s.externals });
+  cacheKey({ prompt: FILE_PROMPT, repair: REPAIR, path: s.path, sha256: s.sha256, role: s.role, imports: s.imports, importedBy: s.importedBy, externals: s.externals });
 
-const folderKey = (s: FolderSubject) => cacheKey({ prompt: FOLDER_PROMPT, folder: s.folder, files: s.files, importsFrom: s.importsFrom, internal: s.internal });
+const folderKey = (s: FolderSubject) => cacheKey({ prompt: FOLDER_PROMPT, repair: REPAIR, folder: s.folder, files: s.files, importsFrom: s.importsFrom, internal: s.internal });
+
+/** What the reader is shown: the repaired text, and how many sentences the repair took out of it. */
+export interface Explanation {
+  body: string;
+  removedSentences: number;
+}
 
 /** Cache reads go through the member's own client, so the policy decides which rows exist. Writes go through the writer. */
 export interface ExplainDbs {
@@ -84,22 +96,30 @@ export interface ExplainDbs {
 
 function cache<S>(dbs: ExplainDbs, keyOf: (s: S) => string) {
   return {
-    async read(s: S) {
-      const { data, error } = await dbs.reader.from("explanations").select("body").eq("model", MODEL).eq("key", keyOf(s)).maybeSingle();
+    async read(s: S): Promise<Explanation | null> {
+      const { data, error } = await dbs.reader
+        .from("explanations")
+        .select("body, removed_sentences")
+        .eq("model", MODEL)
+        .eq("key", keyOf(s))
+        .maybeSingle();
       if (error) throw new Error(`Could not read the cached explanation: ${error.message}`);
-      return data?.body ?? null;
+      return data ? { body: data.body, removedSentences: data.removed_sentences } : null;
     },
-    async write(s: S, body: string) {
+    async write(s: S, value: Explanation) {
       const { error } = await dbs.writer
         .from("explanations")
-        .upsert({ org_id: dbs.orgId, model: MODEL, key: keyOf(s), body }, { onConflict: "org_id,model,key", ignoreDuplicates: true });
+        .upsert(
+          { org_id: dbs.orgId, model: MODEL, key: keyOf(s), body: value.body, removed_sentences: value.removedSentences },
+          { onConflict: "org_id,model,key", ignoreDuplicates: true },
+        );
       if (error) throw new Error(`Could not cache the explanation: ${error.message}`);
     },
   };
 }
 
-export function explainFile(dbs: ExplainDbs, subject: FileSubject): Promise<Cached<string>> {
-  return cachedCall<FileSubject, string>("explain file", {
+export function explainFile(dbs: ExplainDbs, subject: FileSubject): Promise<Cached<Explanation>> {
+  return cachedCall<FileSubject, Explanation>("explain file", {
     ...cache(dbs, fileKey),
     async generate(s) {
       const bytes = await fileAt(s.repo, s.commit, s.path);
@@ -109,7 +129,7 @@ export function explainFile(dbs: ExplainDbs, subject: FileSubject): Promise<Cach
       if (hash !== s.sha256) throw new Error(`${s.path} from GitHub doesn't match what was parsed at ${s.commit.slice(0, 7)}`);
       const source = cut(bytes.toString("utf8"));
       const list = (paths: string[]) => (paths.length > 0 ? paths.map((p) => `- \`${p}\``).join("\n") : "none");
-      return complete(
+      return completeChecked(
         FILE_PROMPT,
         [
           `Repository: ${s.repo.owner}/${s.repo.name}`,
@@ -127,8 +147,8 @@ export function explainFile(dbs: ExplainDbs, subject: FileSubject): Promise<Cach
   })(subject);
 }
 
-export function explainFolder(dbs: ExplainDbs, subject: FolderSubject): Promise<Cached<string>> {
-  return cachedCall<FolderSubject, string>("explain folder", {
+export function explainFolder(dbs: ExplainDbs, subject: FolderSubject): Promise<Cached<Explanation>> {
+  return cachedCall<FolderSubject, Explanation>("explain folder", {
     ...cache(dbs, folderKey),
     async generate(s) {
       const counts = (list: { folder: string; count: number }[]) =>
@@ -142,7 +162,7 @@ export function explainFolder(dbs: ExplainDbs, subject: FolderSubject): Promise<
           f.importedFrom.length > 0 ? `; importers outside the folder by folder: ${counts(f.importedFrom)}` : "",
         ].join(""),
       );
-      return complete(
+      return completeChecked(
         FOLDER_PROMPT,
         [
           `Repository: ${s.repo.owner}/${s.repo.name}`,
@@ -156,7 +176,26 @@ export function explainFolder(dbs: ExplainDbs, subject: FolderSubject): Promise<
   })(subject);
 }
 
-async function complete(prompt: string, input: string): Promise<string> {
+// The invented-path check, live on real traffic: every explanation the model
+// writes is scored against exactly what it was handed, on its own run. The
+// score is the model's raw answer, so it keeps measuring the model; what is
+// returned and cached is the repaired one. A cache hit isn't scored again; the
+// run that generated it already was.
+async function completeChecked(prompt: string, input: string): Promise<Explanation> {
+  const raw = await complete(prompt, input);
+  const invented = inventedPaths(input, raw);
+  const repair = repairPaths(input, raw);
+  const done = [
+    ...repair.rewritten.map((r) => `${r.from} rewritten to ${r.to}`),
+    ...repair.removed.map((p) => `sentence naming ${p} removed`),
+  ];
+  scoreCurrentRun("no_invented_paths", invented.length === 0 ? 1 : 0, invented.length === 0 ? "none" : done.join("; "));
+  if (!repair.body) throw new Error("Every sentence of the explanation named a file the model wasn't shown, so none of it is shown here");
+  return { body: repair.body, removedSentences: repair.sentencesRemoved };
+}
+
+/** One explanation from the model, unscored and uncached. The evals call it with other prompts. */
+export async function complete(prompt: string, input: string): Promise<string> {
   const completion = await ai.chat.completions.create({
     model: MODEL,
     reasoning_effort: "low",

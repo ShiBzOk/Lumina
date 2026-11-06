@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { traceable } from "langsmith/traceable";
+import { getCurrentRunTree, traceable } from "langsmith/traceable";
 import { wrapOpenAI } from "langsmith/wrappers";
 import OpenAI from "openai";
 import { env } from "@/lib/env";
@@ -83,6 +83,23 @@ export function cachedBatch<Item, T>(
 // The input passes through the wrapper so the run records it.
 function traced(name: string, input: unknown, body: (input: unknown) => Promise<unknown>): Promise<unknown> {
   return traceable(async (recorded: unknown) => body(recorded), { name, run_type: "chain", metadata: { model: MODEL } })(input);
+}
+
+/**
+ * Scores the traced run this code is running inside, so a live evaluator's
+ * result sits on the real call it judged. Untraced there is no run to score.
+ *
+ * Not awaited. Inside the app the write took one to three seconds, and the
+ * explanation sat waiting for it after the model had already answered. The
+ * server is a long-running process, so the write finishes on its own. One that
+ * fails is logged, not thrown: the user's answer is already made.
+ */
+export function scoreCurrentRun(key: string, score: number, comment: string): void {
+  const run = getCurrentRunTree(true);
+  if (!tracing || !run) return;
+  run.client.createFeedback(run.id, key, { score, comment }).catch((error: unknown) => {
+    console.error(`Could not record ${key} on run ${run.id}:`, error);
+  });
 }
 
 /** A cache key: the hash of everything that decides the answer. The model is keyed separately. */

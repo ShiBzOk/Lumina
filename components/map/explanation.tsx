@@ -96,6 +96,13 @@ export function Explanation({ analysisId, subject, handed, unexplainable, state,
           <div className="transition-opacity duration-300 ease-out starting:opacity-0">
             <Stale analysisId={analysisId} noun={noun} freshness={state.freshness} branch={state.branch} commit={state.commit} />
             <Prose body={state.body} {...links} />
+            {state.removedSentences > 0 ? (
+              // Said, not hidden: the reader should know the text is shorter than what the model wrote, and why.
+              <p className="mt-2 text-[10px] leading-snug text-muted">
+                {state.removedSentences === 1 ? "1 sentence" : `${state.removedSentences} sentences`} removed: named a file the model
+                wasn&apos;t given.
+              </p>
+            ) : null}
             <div className="mt-3 flex items-center gap-1.5 border-t border-border pt-2 font-mono text-[10px] text-muted">
               {/* Kept: it's how a working cache is told from a broken one. */}
               <Tag>{state.cached ? "From cache" : "Generated"}</Tag>
