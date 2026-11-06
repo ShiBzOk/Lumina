@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { MODEL_CATEGORIES, type Framework, type ModelRole } from "@/lib/map/frameworks";
 import { walk, DEFAULT_DEPTH, DEPTHS, type Adjacency, type WalkDirection } from "@/lib/map/graph";
 import { sameSelection, type Selection } from "@/lib/map/highlight";
@@ -18,7 +18,6 @@ export type PaneTab = "structure" | "explanation";
 const LIST_LIMIT = 8;
 
 interface DetailPaneProps {
-  analysisId: string;
   map: RepoMap;
   repo: string;
   /** The framework the adapter recognised, or null under the fallback. */
@@ -34,8 +33,6 @@ interface DetailPaneProps {
   /** Explanations fetched so far, by subject; they stay when the selection moves. */
   explanations: ReadonlyMap<string, ExplainState>;
   onExplain: (subject: NonNullable<Selection>) => void;
-  model: string;
-  tracing: boolean;
   importsOf: ReadonlyMap<string, readonly ImportRecord[]>;
   graph: Adjacency;
   insights: Insights;
@@ -59,16 +56,32 @@ export function DetailPane(props: DetailPaneProps) {
   // What the prose may link to: real files, and folders that are boxes on the map.
   const filePaths = useMemo(() => new Set(files.keys()), [files]);
   const folderIds = useMemo(() => new Set(map.nodes.map((n) => n.id)), [map]);
+  // The underline is one element that slides between the tabs, so it is
+  // measured from them. Absent until measured, so it appears in place on
+  // mount and only ever moves because a tab was clicked.
+  const tabs = useRef<Record<PaneTab, HTMLButtonElement | null>>({ structure: null, explanation: null });
+  const [underline, setUnderline] = useState<{ x: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = tabs.current[tab];
+    if (el) setUnderline({ x: el.offsetLeft, width: el.offsetWidth });
+  }, [tab]);
 
   return (
     <aside className="flex w-full flex-col border-l border-border bg-surface">
-      <div className="flex h-11 shrink-0 items-end gap-4 border-b border-border px-3">
-        <TabButton active={tab === "structure"} onClick={() => onTab("structure")}>
+      <div className="relative flex h-11 shrink-0 items-end gap-4 border-b border-border px-3">
+        <TabButton active={tab === "structure"} onClick={() => onTab("structure")} ref={(el) => void (tabs.current.structure = el)}>
           Structure
         </TabButton>
-        <TabButton active={tab === "explanation"} onClick={() => onTab("explanation")}>
+        <TabButton active={tab === "explanation"} onClick={() => onTab("explanation")} ref={(el) => void (tabs.current.explanation = el)}>
           Explanation
         </TabButton>
+        {underline && (
+          <span
+            aria-hidden
+            className="slide absolute bottom-[-1px] left-0 h-0.5 bg-accent"
+            style={{ translate: `${underline.x}px 0`, width: underline.width }}
+          />
+        )}
         <span className="flex-1" />
         <button type="button" onClick={onCollapse} title="Hide details" className="mb-2 rounded p-1 text-muted hover:bg-background">
           <Icon name="chevronRight" className="size-3.5" />
@@ -78,13 +91,10 @@ export function DetailPane(props: DetailPaneProps) {
         {tab === "explanation" ? (
           target ? (
             <Explanation
-              analysisId={props.analysisId}
               subject={target}
               handed={target.kind === "file" ? fileHanded(target.path, graph) : folderHanded(node?.files.map((f) => f.path) ?? [], graph)}
               unexplainable={target.kind === "file" && files.get(target.path)?.kind === "asset" ? "Assets aren't parsed, so there is nothing to explain from." : null}
               state={props.explanations.get(explainKey(target))}
-              model={props.model}
-              tracing={props.tracing}
               onExplain={() => props.onExplain(target)}
               files={filePaths}
               folders={folderIds}
@@ -126,13 +136,14 @@ function folderHanded(paths: readonly string[], graph: Adjacency): Handed[] {
   ];
 }
 
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+function TabButton({ active, onClick, children, ref }: { active: boolean; onClick: () => void; children: ReactNode; ref: Ref<HTMLButtonElement> }) {
   return (
     <button
+      ref={ref}
       type="button"
       onClick={onClick}
-      className={`-mb-px border-b-2 pb-2.5 text-xs font-medium ${
-        active ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"
+      className={`-mb-px border-b-2 border-transparent pb-2.5 text-xs font-medium transition-[color,scale] duration-150 ${
+        active ? "text-foreground" : "text-muted hover:text-foreground"
       }`}
     >
       {children}
@@ -681,7 +692,7 @@ function Walk({
             type="button"
             aria-pressed={direction === w.direction}
             onClick={() => setDirection((d) => (d === w.direction ? null : w.direction))}
-            className={`flex items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium ${
+            className={`flex items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium transition-[color,background-color,border-color,scale] duration-150 ${
               direction === w.direction ? "border-accent/40 bg-accent/8 text-accent" : "border-border hover:bg-background"
             }`}
           >
@@ -698,15 +709,21 @@ function Walk({
           <p className="mb-2 px-1 text-[10.5px] text-muted">{active.note}</p>
           <div className="mb-2 flex items-center gap-2 px-1 text-[10.5px] text-muted">
             <span>Levels deep</span>
-            <div className="flex rounded-md border border-border p-0.5" role="group" aria-label="Levels deep">
+            <div className="relative flex rounded-md border border-border p-0.5" role="group" aria-label="Levels deep">
+              {/* One marker under all three, slid to the chosen level; every button is the same width, so its index places it. */}
+              <span
+                aria-hidden
+                className="slide absolute top-0.5 bottom-0.5 left-0.5 w-6 rounded bg-accent/10"
+                style={{ translate: `${DEPTHS.findIndex((d) => d === depth) * 100}% 0` }}
+              />
               {DEPTHS.map((d) => (
                 <button
                   key={d}
                   type="button"
                   aria-pressed={depth === d}
                   onClick={() => setDepth(d)}
-                  className={`w-6 rounded py-0.5 font-mono text-[10.5px] tabular-nums ${
-                    depth === d ? "bg-accent/10 font-semibold text-accent" : "hover:bg-background hover:text-foreground"
+                  className={`relative w-6 rounded py-0.5 font-mono text-[10.5px] tabular-nums transition-[color,scale] duration-150 ${
+                    depth === d ? "font-semibold text-accent" : "hover:text-foreground"
                   }`}
                 >
                   {d}

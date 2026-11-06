@@ -7,6 +7,7 @@ import { PetrolBand } from "@/components/petrol-band";
 import { Spinner } from "@/components/spinner";
 import { sameEvent, STAGE_LABEL, STAGES, type StageEvent } from "@/lib/stages";
 import { useAnalysisStage } from "@/lib/use-analysis-stage";
+import { LoadingAnalysis } from "./loading";
 
 interface ProgressProps {
   id: string;
@@ -28,17 +29,19 @@ export function AnalysisProgress({ id, repo, branch, commit, initial, stale: sta
   const current = event.stage === null ? -1 : STAGES.indexOf(event.stage);
   const failed = event.status === "failed";
 
+  // The page refreshes into the map on its own, but a refresh is a transition:
+  // React keeps this screen up while the server reads the graph back, so the
+  // Suspense fallback never shows. The same loader is shown from here instead.
+  if (event.status === "complete") return <LoadingAnalysis />;
+
   // Said in the card's header, so the list itself only has to show which stage is which.
-  const summary =
-    event.status === "complete"
-      ? "Done"
-      : failed
-        ? "Failed"
-        : stale
-          ? "Stopped responding"
-          : event.status === "queued" || current === -1
-            ? "Queued"
-            : `${current + 1} of ${STAGES.length}`;
+  const summary = failed
+    ? "Failed"
+    : stale
+      ? "Stopped responding"
+      : event.status === "queued" || current === -1
+        ? "Queued"
+        : `${current + 1} of ${STAGES.length}`;
 
   return (
     <PetrolBand
@@ -67,20 +70,10 @@ export function AnalysisProgress({ id, repo, branch, commit, initial, stale: sta
         <span className={`font-mono text-[10px] tabular-nums ${failed ? "text-danger" : "text-muted"}`}>{summary}</span>
       </header>
 
-      {/* The page refreshes into the map on its own, but reading a large
-          graph takes seconds, and "Done" alone would look like nothing more
-          is coming. */}
-      {event.status === "complete" && (
-        <p className="flex items-center gap-2 border-b border-border px-4 py-2.5 text-[11px] text-muted">
-          <Spinner className="size-3" />
-          Opening the map. A large repository takes a few seconds to read back.
-        </p>
-      )}
-
       <ol>
         {STAGES.map((stage, i) => {
           const state =
-            event.status === "complete" || i < current
+            i < current
               ? "done"
               : i === current
                 ? failed

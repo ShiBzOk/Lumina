@@ -8,7 +8,7 @@ import { PageTransition } from "@/components/page-transition";
 
 async function Repositories({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
   // `/?add` arrives from the map's repository menu, asking for the form straight away.
-  const [analyses, params] = await Promise.all([listAnalyses(), searchParams]);
+  const [analyses, params, { orgId }] = await Promise.all([listAnalyses(), searchParams, auth()]);
   const rows: RepositoryRow[] = analyses.map((a) => ({
     id: a.id,
     repo: a.project ? `${a.project.repo_owner}/${a.project.repo_name}` : "(unknown repository)",
@@ -20,7 +20,9 @@ async function Repositories({ searchParams }: { searchParams: PageProps<"/">["se
     packages: a.package_count,
     stale: a.stale,
   }));
-  return <RepositoryBrowser rows={rows} focus={params.add !== undefined} />;
+  // Keyed by organization, so switching mounts a fresh list, which settles in
+  // rather than being swapped under the pointer.
+  return <RepositoryBrowser key={orgId} rows={rows} focus={params.add !== undefined} />;
 }
 
 // The one address that is both front door and workspace. Signed out, it's the
@@ -34,13 +36,7 @@ async function Home({ searchParams }: { searchParams: PageProps<"/">["searchPara
     <div className="flex min-h-screen flex-col">
       <WorkspaceHeader />
       <main className="flex flex-1 flex-col">
-        <Suspense
-          fallback={
-            <div className="px-4 py-10 text-center text-xs text-muted">
-              Loading repositories…
-            </div>
-          }
-        >
+        <Suspense fallback={<div className="px-4 py-10 text-center text-xs text-muted">Loading repositories…</div>}>
           <Repositories searchParams={searchParams} />
         </Suspense>
       </main>

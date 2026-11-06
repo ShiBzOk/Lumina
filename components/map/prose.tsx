@@ -96,7 +96,7 @@ function renderInline(inline: Inline[], links: Links): ReactNode[] {
       return target ? (
         <PathLink key={i} target={target} text={part.text} {...links} />
       ) : (
-        <code key={i} className="rounded bg-background px-1 font-mono text-[10.5px] ring-1 ring-border">
+        <code key={i} className="rounded bg-background px-1 font-mono text-[10.5px] [overflow-wrap:anywhere] ring-1 ring-border box-decoration-clone">
           {part.text}
         </code>
       );
@@ -137,19 +137,30 @@ function linkWords(text: string, links: Links): ReactNode[] {
   });
 }
 
+// A span, not a <button>: a button is always laid out as an inline-block, so a
+// long path inside a sentence dropped onto its own line and left the
+// brackets around it stranded on the lines above and below. This wraps with
+// the text instead, and only breaks a path where it has to.
 function PathLink({ target, text, hovered, onSelect, onHover }: { target: NonNullable<Selection>; text: string } & Links) {
   return (
-    <button
-      type="button"
+    <span
+      role="button"
+      tabIndex={0}
       title={target.kind === "file" ? target.path : `${target.id}/`}
       onClick={() => onSelect(target)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(target);
+        }
+      }}
       onMouseEnter={() => onHover(target)}
       onMouseLeave={() => onHover(null)}
-      className={`rounded px-0.5 font-mono text-[10.5px] break-all text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent ${
+      className={`cursor-pointer rounded px-0.5 font-mono text-[10.5px] text-accent underline decoration-accent/30 underline-offset-2 [overflow-wrap:anywhere] box-decoration-clone hover:decoration-accent ${
         sameSelection(hovered, target) ? "bg-accent/10" : ""
       }`}
     >
       {text}
-    </button>
+    </span>
   );
 }

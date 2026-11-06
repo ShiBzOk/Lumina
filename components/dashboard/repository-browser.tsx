@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { submitRepository, type SubmitState } from "@/app/analyses/actions";
 import { Icon } from "@/components/map/icons";
+import { RemapButton, useHeadCheck } from "@/components/new-commits";
 import { PetrolBand } from "@/components/petrol-band";
 import { formatCount, sameEvent, STAGE_LABEL, type AnalysisStage, type AnalysisStatus } from "@/lib/stages";
 import { useAnalysisStage } from "@/lib/use-analysis-stage";
@@ -53,7 +54,7 @@ export function RepositoryBrowser({ rows, focus }: { rows: RepositoryRow[]; focu
               makes.
             </p>
           ) : (
-            <section className="border-t border-border">
+            <section className="border-t border-border transition-[opacity,translate] duration-200 ease-out starting:translate-y-1 starting:opacity-0 motion-reduce:starting:translate-y-0">
               <header className="flex h-9 items-center gap-2 bg-background px-4">
                 <h2 className="text-[11px] font-semibold">Repositories</h2>
                 <span className="font-mono text-[10px] text-muted tabular-nums">{rows.length}</span>
@@ -138,16 +139,20 @@ function Row({ row }: { row: RepositoryRow }) {
   const stale = row.stale && sameEvent(event, initial);
   const done = event.status === "complete";
   const failed = event.status === "failed";
+  // Only a finished map has a commit to compare; one still running will take the tip anyway.
+  const head = useHeadCheck(row.id, done);
+  const moved = head?.state === "moved";
 
   // A ready row says nothing beyond its size; words only appear when it is not ready.
   let note: string | null = null;
   if (failed) note = event.message ?? "Failed";
   else if (stale) note = "Stopped responding";
   else if (!done) note = statusOf(event.stage, event.status) + (unavailable ? " · live updates off" : "");
+  else if (moved) note = "New commits since this map";
 
   return (
-    <li className="border-t border-border first:border-t-0">
-      <Link href={`/analyses/${row.id}`} className="group flex h-10 items-center gap-3 px-4 hover:bg-background">
+    <li className="flex items-center border-t border-border first:border-t-0 hover:bg-background">
+      <Link href={`/analyses/${row.id}`} className="group flex h-10 min-w-0 flex-1 items-center gap-3 px-4">
         <span className="min-w-0 truncate font-mono text-xs">{row.repo}</span>
         {row.branch && <span className="shrink-0 font-mono text-[10px] text-muted">{row.branch}</span>}
         <span className={`min-w-0 flex-1 truncate text-right text-[11px] ${failed ? "text-danger" : "text-muted"}`}>
@@ -155,6 +160,13 @@ function Row({ row }: { row: RepositoryRow }) {
         </span>
         <Icon name="arrowRight" className="size-3.5 shrink-0 text-muted group-hover:text-accent" />
       </Link>
+      {/* Outside the link: re-mapping is its own act, not a way into the map. */}
+      {moved && (
+        <RemapButton
+          analysisId={row.id}
+          className="mr-3 h-6 rounded-md px-2 text-[11px] font-medium text-petrol ring-1 ring-petrol/30 hover:bg-petrol/5"
+        />
+      )}
     </li>
   );
 }

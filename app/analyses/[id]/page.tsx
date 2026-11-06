@@ -5,7 +5,6 @@ import { LoadingAnalysis } from "@/components/analysis/loading";
 import { AnalysisProgress } from "@/components/analysis/progress";
 import { MapWorkspace } from "@/components/map/map-workspace";
 import { WorkspaceHeader } from "@/components/workspace-header";
-import { MODEL, tracing } from "@/lib/ai/client";
 import { getAnalysis, listAnalyses, loadGraph } from "@/lib/analyses";
 import { PageTransition } from "@/components/page-transition";
 
@@ -43,8 +42,6 @@ async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["param
         routesWithheld={routesWithheld}
         coverage={coverage}
         labels={labels}
-        model={MODEL}
-        tracing={tracing}
       />
     );
   }

@@ -59,25 +59,41 @@ export async function resolveCommit(repo: RepoRef, branch: string | null): Promi
   const description = field(body, "description");
 
   const ref = branch ?? defaultBranch;
-  const commit = await github(
-    `/repos/${slug}/commits/${encodeURIComponent(ref)}`,
-    `${slug} has no branch named "${ref}"`,
-    { Accept: "application/vnd.github.sha" },
-  );
-  const sha = (await commit.text()).trim();
-  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`GitHub returned "${sha.slice(0, 60)}" instead of a commit for ${slug}@${ref}`);
+  const sha = await headCommit(repo, ref);
   return { branch: ref, sha, description: typeof description === "string" && description.trim() ? description.trim() : null };
 }
 
-/** The commit `branch` points at now. One API request. */
+/**
+ * The commit `branch` points at now, asked the way `git ls-remote` asks:
+ * git's own protocol (v2 ls-refs), not the REST API. It is checked every time
+ * a map or the repositories list opens and at the start of every run, and
+ * the 60-an-hour API allowance is kept for what only the API can answer.
+ */
 export async function headCommit(repo: RepoRef, branch: string): Promise<string> {
   const slug = `${repo.owner}/${repo.name}`;
-  const res = await github(`/repos/${slug}/commits/${encodeURIComponent(branch)}`, `${slug} has no branch named "${branch}" any more`, {
-    Accept: "application/vnd.github.sha",
+  const ref = `refs/heads/${branch}`;
+  const pkt = (line: string) => (Buffer.byteLength(line) + 4).toString(16).padStart(4, "0") + line;
+  const res = await fetch(`https://github.com/${slug}.git/git-upload-pack`, {
+    method: "POST",
+    headers: {
+      "User-Agent": "lumina",
+      "Git-Protocol": "version=2",
+      "Content-Type": "application/x-git-upload-pack-request",
+      Accept: "application/x-git-upload-pack-result",
+    },
+    // "0001" separates the command from its arguments, "0000" ends the request.
+    body: `${pkt("command=ls-refs\n")}0001${pkt(`ref-prefix ${ref}\n`)}0000`,
   });
-  const sha = (await res.text()).trim();
-  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`GitHub returned "${sha.slice(0, 60)}" instead of a commit for ${slug}@${branch}`);
-  return sha;
+  // GitHub answers 401 rather than 404 for a repository that is missing or private.
+  if (res.status === 401 || res.status === 404) throw new Error(`github.com/${slug} doesn't exist or isn't public`);
+  if (!res.ok) throw new Error(`GitHub answered HTTP ${res.status} when asked for ${slug}@${branch}`);
+  // Each line is a 4-digit length, then "<sha> <ref>". The prefix also matches
+  // longer names (main matches main-v2), so only the exact ref counts.
+  for (const line of (await res.text()).split("\n")) {
+    const m = /^[0-9a-f]{4}([0-9a-f]{40}) (.+)$/.exec(line);
+    if (m && m[2] === ref) return m[1];
+  }
+  throw new Error(`${slug} has no branch named "${branch}"`);
 }
 
 /**

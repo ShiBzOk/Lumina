@@ -66,12 +66,50 @@ export function foldAt(files: readonly { path: string; folder: string }[], thres
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-/** Raise the threshold from two until the map lands under MAX_NODES, and stop there. */
+/**
+ * How many nodes `foldAt` would make at a threshold, from per-directory counts
+ * alone: the same merges, deepest first, without moving any paths. A merge at
+ * one depth only lands a level up, so the order within a depth doesn't matter.
+ */
+function nodeCounter(files: readonly { folder: string }[]): (threshold: number) => number {
+  const own = new Map<string, number>();
+  for (const f of files) {
+    own.set(f.folder, (own.get(f.folder) ?? 0) + 1);
+    // Ancestors are registered whole, so the first known one means the rest are too.
+    for (let d = f.folder; d !== "."; ) {
+      d = parentOf(d);
+      if (own.has(d)) break;
+      own.set(d, 0);
+    }
+  }
+  const dirs = [...own.keys()].sort((a, b) => depthOf(b) - depthOf(a));
+  const index = new Map(dirs.map((d, i) => [d, i]));
+  const parent = dirs.map((d) => (d === "." ? -1 : (index.get(parentOf(d)) ?? -1)));
+  const counts = dirs.map((d) => own.get(d) ?? 0);
+  return (threshold) => {
+    const held = counts.slice();
+    let nodes = 0;
+    for (let i = 0; i < dirs.length; i++) {
+      const n = held[i];
+      if (n > 0 && n < threshold && parent[i] !== -1) held[parent[i]] += n;
+      else if (n > 0) nodes++;
+    }
+    return nodes;
+  };
+}
+
+/**
+ * Raise the threshold from two until the map lands under MAX_NODES, and stop
+ * there. The search runs on counts; folding every path at every threshold
+ * took 14 seconds on a repository that needed a threshold in the hundreds.
+ * The fold itself still runs once, at the threshold found.
+ */
 export function fold(files: readonly { path: string; folder: string }[], maxNodes = MAX_NODES): Fold {
+  const nodesAt = nodeCounter(files);
   let threshold = 2;
-  let nodes = foldAt(files, threshold);
   // At files.length + 1 everything merges into the root, so this always ends.
-  while (nodes.length > maxNodes && threshold <= files.length) nodes = foldAt(files, ++threshold);
+  while (nodesAt(threshold) > maxNodes && threshold <= files.length) threshold++;
+  const nodes = foldAt(files, threshold);
   const nodeOf = new Map<string, string>();
   for (const n of nodes) for (const f of n.files) nodeOf.set(f, n.id);
   return { threshold, nodes, nodeOf };

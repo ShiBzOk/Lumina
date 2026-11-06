@@ -196,6 +196,29 @@ body {
   }
 }
 
+/* Press feedback: a button gives a little the instant it is pressed and comes
+   back the instant it is let go, so a click is felt before anything it causes
+   arrives. Full-width rows are left still, since 3% of a wide row is a lurch,
+   and so is the canvas, where a press may be the start of a drag. Utilities
+   that set their own transition win over this, being a later layer. */
+@layer base {
+  button:not(:disabled) {
+    transition: scale 120ms ease-out;
+  }
+  button:not(:disabled):active:not(.w-full, .react-flow *) {
+    scale: 0.96;
+    transition-duration: 60ms;
+  }
+}
+
+/* A selection marker that slides to what was picked rather than reappearing
+   there, on the same spring as everything else. */
+.slide {
+  transition:
+    translate var(--spring-duration) var(--spring),
+    width var(--spring-duration) var(--spring);
+}
+
 /* Between pages: the old page fades out quickly, the new one rises a few
    pixels as it fades in, starting once the old one has mostly gone. Short and
    small, because it happens on every click. */
@@ -216,6 +239,34 @@ body {
   from {
     translate: 0 8px;
   }
+}
+
+/* Panels that drop open on click: height on the spring, content fading in a
+   touch behind it, so it unfolds rather than appears. `.drop` is a panel kept
+   mounted and toggled with data-open; `.drop-details` is a <details> row. */
+.drop,
+.drop-details::details-content {
+  interpolate-size: allow-keywords;
+  overflow: hidden;
+  block-size: 0;
+  opacity: 0;
+  transition:
+    block-size var(--spring-duration) var(--spring),
+    opacity 180ms ease-out,
+    content-visibility var(--spring-duration) allow-discrete,
+    visibility var(--spring-duration) allow-discrete;
+}
+.drop {
+  visibility: hidden;
+}
+.drop[data-open],
+.drop-details[open]::details-content {
+  block-size: auto;
+  opacity: 1;
+  visibility: visible;
+}
+.drop-chevron {
+  transition: rotate var(--spring-duration) var(--spring);
 }
 
 /* FAQ answers open and close by height, then fade in. Browsers without

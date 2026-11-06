@@ -3,12 +3,11 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
-import { createHash } from "node:crypto";
 import { MODEL } from "@/lib/ai/client";
 import { aggregate, explainFile, explainFolder, type FolderFile } from "@/lib/ai/explain";
 import { getAnalysis, loadFileNeighbourhood, loadStructure } from "@/lib/analyses";
 import { fold } from "@/lib/map/fold";
-import { fileAt, headCommit, parseRepoInput, type RepoRef } from "@/lib/pipeline/github";
+import { parseRepoInput } from "@/lib/pipeline/github";
 import { runAnalysis } from "@/lib/pipeline/run";
 import { STALE_AFTER_MS } from "@/lib/stages";
 import { createServerSupabase, createWriterSupabase } from "@/lib/supabase";
@@ -144,15 +143,6 @@ export async function rerunAnalysis(analysisId: string): Promise<void> {
 
 export type ExplainSubject = { kind: "file"; path: string } | { kind: "node"; id: string };
 
-/** Whether what was analysed is still what the repository holds. */
-export type Freshness =
-  | { state: "current" }
-  /** The branch moved on, but this file (when it is one) is unchanged. */
-  | { state: "moved"; head: string }
-  | { state: "changed"; head: string; deleted: boolean }
-  /** The check itself couldn't run; said rather than assumed either way. */
-  | { state: "unknown"; reason: string };
-
 export type ExplainResult =
   | {
       ok: true;
@@ -161,9 +151,6 @@ export type ExplainResult =
       removedSentences: number;
       cached: boolean;
       model: string;
-      commit: string;
-      branch: string;
-      freshness: Freshness;
     }
   | { ok: false; error: string };
 
@@ -181,7 +168,7 @@ export async function explain(analysisId: string, subject: ExplainSubject): Prom
       return { ok: false, error: "The analysis isn't complete, so there is nothing to explain yet" };
     }
     const repo = { owner: analysis.project.repo_owner, name: analysis.project.repo_name };
-    const { commit_sha: commit, branch } = analysis;
+    const commit = analysis.commit_sha;
     const dbs = { reader: createServerSupabase(), writer: createWriterSupabase(), orgId };
 
     // A file needs only its own rows and its neighbours'. Reading the whole
@@ -190,20 +177,17 @@ export async function explain(analysisId: string, subject: ExplainSubject): Prom
       const file = await loadFileNeighbourhood(analysis, subject.path);
       if (!file) return { ok: false, error: `${subject.path} is not in this analysis` };
       if (file.kind === "asset") return { ok: false, error: "Assets aren't parsed, so there is nothing to explain from." };
-      const [result, freshness] = await Promise.all([
-        explainFile(dbs, {
-          repo,
-          commit,
-          path: file.path,
-          sha256: file.sha256,
-          role: file.role,
-          imports: file.imports,
-          importedBy: file.importedBy,
-          externals: file.externals,
-        }),
-        checkFreshness(repo, branch, commit, file),
-      ]);
-      return { ok: true, ...result.value, cached: result.cached, model: MODEL, commit, branch, freshness };
+      const result = await explainFile(dbs, {
+        repo,
+        commit,
+        path: file.path,
+        sha256: file.sha256,
+        role: file.role,
+        imports: file.imports,
+        importedBy: file.importedBy,
+        externals: file.externals,
+      });
+      return { ok: true, ...result.value, cached: result.cached, model: MODEL };
     }
 
     // A folder is folded from every path, but needs no import rows.
@@ -231,27 +215,10 @@ export async function explain(analysisId: string, subject: ExplainSubject): Prom
         ? [{ path: p, sha256: f.sha256, role: f.role ?? labelOf.get(p) ?? null, lines: f.lines, fanIn: f.fanIn, fanOut: f.fanOut, importedFrom: aggregate(importedFrom.get(p) ?? []) }]
         : [];
     });
-    const [result, freshness] = await Promise.all([
-      explainFolder(dbs, { repo, folder: node.id, files, importsFrom: aggregate(importsFrom), internal }),
-      checkFreshness(repo, branch, commit, null),
-    ]);
-    return { ok: true, ...result.value, cached: result.cached, model: MODEL, commit, branch, freshness };
+    const result = await explainFolder(dbs, { repo, folder: node.id, files, importsFrom: aggregate(importsFrom), internal });
+    return { ok: true, ...result.value, cached: result.cached, model: MODEL };
   } catch (error) {
     // Returned rather than thrown: a thrown message is hidden in production, and this one is the user's to read.
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-async function checkFreshness(repo: RepoRef, branch: string, commit: string, file: { path: string; sha256: string } | null): Promise<Freshness> {
-  try {
-    const head = await headCommit(repo, branch);
-    if (file) {
-      const bytes = head === commit ? null : await fileAt(repo, head, file.path);
-      if (head !== commit && bytes === null) return { state: "changed", head, deleted: true };
-      if (bytes !== null && createHash("sha256").update(bytes).digest("hex") !== file.sha256) return { state: "changed", head, deleted: false };
-    }
-    return head === commit ? { state: "current" } : { state: "moved", head };
-  } catch (error) {
-    return { state: "unknown", reason: error instanceof Error ? error.message : String(error) };
   }
 }

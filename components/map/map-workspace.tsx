@@ -14,6 +14,7 @@ import type { Coverage, Edge, ImportRecord, RepoFile, Route, WithheldRoute } fro
 import { Canvas, type CanvasHandle } from "./canvas";
 import { CategoryRail } from "./category-rail";
 import { CoverageBanner } from "./coverage-banner";
+import { NewCommitsBanner } from "./new-commits-banner";
 import { DetailPane, type PaneTab } from "./detail-pane";
 import { Drawer } from "./drawer";
 import { explainKey, type ExplainState } from "./explanation";
@@ -33,14 +34,11 @@ interface MapWorkspaceProps {
   routesWithheld: WithheldRoute[];
   coverage: Coverage;
   labels: { path: string; role: ModelRole }[];
-  /** The pinned model, shown before anything is asked of it. */
-  model: string;
-  tracing: boolean;
 }
 
 // The shell: header across the top, categories on the left, the canvas in the
 // middle, details on the right. Later phases add to these panels, not move them.
-export function MapWorkspace({ meta, repositories, adapter, files, edges, imports, routes, routesWithheld, coverage, labels, model, tracing }: MapWorkspaceProps) {
+export function MapWorkspace({ meta, repositories, adapter, files, edges, imports, routes, routesWithheld, coverage, labels }: MapWorkspaceProps) {
   const modelRoles = useMemo(() => new Map(labels.map((l) => [l.path, l.role])), [labels]);
   const map = useMemo(() => buildMap(files, edges, modelRoles), [files, edges, modelRoles]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -146,6 +144,7 @@ export function MapWorkspace({ meta, repositories, adapter, files, edges, import
         <AccountButton />
       </header>
 
+      <NewCommitsBanner analysisId={meta.analysisId} branch={meta.branch} commit={meta.commit} />
       <CoverageBanner coverage={coverage} />
 
       <div className="flex min-h-0 flex-1">
@@ -225,7 +224,6 @@ export function MapWorkspace({ meta, repositories, adapter, files, edges, import
 
         <Drawer open={paneOpen} side="right" width="19rem">
           <DetailPane
-            analysisId={meta.analysisId}
             map={map}
             repo={meta.repo}
             framework={framework}
@@ -238,8 +236,6 @@ export function MapWorkspace({ meta, repositories, adapter, files, edges, import
             modelRoles={modelRoles}
             explanations={explanations}
             onExplain={runExplain}
-            model={model}
-            tracing={tracing}
             importsOf={importsOf}
             graph={graph}
             insights={insights}

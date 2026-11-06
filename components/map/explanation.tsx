@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { rerunAnalysis, type ExplainResult, type Freshness } from "@/app/analyses/actions";
+import type { ExplainResult } from "@/app/analyses/actions";
 import type { Selection } from "@/lib/map/highlight";
 import { Icon, type IconName } from "./icons";
 import { Prose } from "./prose";
@@ -25,15 +25,12 @@ export function explainKey(subject: NonNullable<Selection>): string {
 }
 
 interface ExplanationProps {
-  analysisId: string;
   subject: NonNullable<Selection>;
   /** What the model is given, said before asking so it's clear what it works from. */
   handed: Handed[];
   /** Why this subject can't be explained, or null when it can. */
   unexplainable: string | null;
   state: ExplainState | undefined;
-  model: string;
-  tracing: boolean;
   onExplain: () => void;
   files: ReadonlySet<string>;
   folders: ReadonlySet<string>;
@@ -42,7 +39,7 @@ interface ExplanationProps {
   onHover: (s: Selection) => void;
 }
 
-export function Explanation({ analysisId, subject, handed, unexplainable, state, model, tracing, onExplain, ...links }: ExplanationProps) {
+export function Explanation({ subject, handed, unexplainable, state, onExplain, ...links }: ExplanationProps) {
   const noun = subject.kind === "file" ? "file" : "folder";
   return (
     <div className="flex min-h-full flex-col px-3 pt-3 pb-3">
@@ -94,7 +91,6 @@ export function Explanation({ analysisId, subject, handed, unexplainable, state,
         ) : (
           // Arrives as a whole, so it fades in as one rather than appearing mid-thought.
           <div className="transition-opacity duration-300 ease-out starting:opacity-0">
-            <Stale analysisId={analysisId} noun={noun} freshness={state.freshness} branch={state.branch} commit={state.commit} />
             <Prose body={state.body} {...links} />
             {state.removedSentences > 0 ? (
               // Said, not hidden: the reader should know the text is shorter than what the model wrote, and why.
@@ -114,18 +110,6 @@ export function Explanation({ analysisId, subject, handed, unexplainable, state,
           </div>
         )}
       </div>
-
-      <p className="mt-4 text-[10px] leading-snug text-muted">
-        {state?.status === "done" ? null : <>Model: <span className="font-mono">{model}</span>. </>}
-        {tracing ? (
-          "Calls are traced in LangSmith."
-        ) : (
-          <>
-            Tracing is off: set <span className="font-mono">LANGSMITH_TRACING=true</span> and <span className="font-mono">LANGSMITH_API_KEY</span>. Calls
-            still work, untraced.
-          </>
-        )}
-      </p>
     </div>
   );
 }
@@ -200,34 +184,4 @@ function Elapsed({ since }: { since: number }) {
 
 function Tag({ children }: { children: ReactNode }) {
   return <span className="shrink-0 rounded bg-background px-1.5 py-px font-sans ring-1 ring-border">{children}</span>;
-}
-
-function Stale({ analysisId, noun, freshness, branch, commit }: { analysisId: string; noun: string; freshness: Freshness; branch: string; commit: string }) {
-  if (freshness.state === "current") return null;
-  const at = commit.slice(0, 7);
-  const message =
-    freshness.state === "unknown"
-      ? `Couldn't check whether this is still current: ${freshness.reason}`
-      : freshness.state === "changed"
-        ? freshness.deleted
-          ? `Stale: this file no longer exists on ${branch} (now ${freshness.head.slice(0, 7)}). This explains it as of ${at}.`
-          : `Stale: this file has changed on ${branch} since ${at}, which is what this explains.`
-        : noun === "file"
-          ? `${branch} has moved past ${at} to ${freshness.head.slice(0, 7)}. This file is unchanged; files around it may not be.`
-          : `${branch} has moved past ${at} to ${freshness.head.slice(0, 7)}. This explains the folder as of ${at}.`;
-  return (
-    <div className="mb-2.5 rounded-md border border-border bg-background px-2.5 py-2 text-[11px] leading-snug">
-      <p className="flex gap-1.5">
-        <Icon name="alert" className="mt-0.5 size-3 shrink-0 text-muted" />
-        <span className="min-w-0 break-words">{message}</span>
-      </p>
-      {freshness.state !== "unknown" && (
-        <form action={rerunAnalysis.bind(null, analysisId)} className="mt-1.5 pl-[18px]">
-          <button type="submit" className="font-medium text-accent underline-offset-2 hover:underline">
-            Re-analyse at the latest commit
-          </button>
-        </form>
-      )}
-    </div>
-  );
 }
