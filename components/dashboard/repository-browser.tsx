@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { submitRepository, type SubmitState } from "@/app/analyses/actions";
+import { AttributionLine } from "@/components/attribution-line";
 import { Icon } from "@/components/map/icons";
 import { RemapButton, useHeadCheck } from "@/components/new-commits";
 import { PetrolBand } from "@/components/petrol-band";
 import { formatCount, sameEvent, STAGE_LABEL, versionName, type AnalysisStage, type AnalysisStatus } from "@/lib/stages";
 import { useAnalysisStage } from "@/lib/use-analysis-stage";
+import type { Attribution } from "@/lib/when";
 
 /** A repository, described by its latest analysis. */
 export interface RepositoryRow {
@@ -29,6 +31,10 @@ export interface RepositoryRow {
   files: number | null;
   packages: number | null;
   stale: boolean;
+  /** Who started the latest analysis and when, worked out when the page loaded. */
+  attribution: Attribution;
+  /** Someone else finished a map of it since this person last opened one. */
+  isNew: boolean;
 }
 
 export function RepositoryBrowser({ rows, focus }: { rows: RepositoryRow[]; focus: boolean }) {
@@ -165,10 +171,16 @@ function Row({ row }: { row: RepositoryRow }) {
     <li className="flex items-center border-t border-border first:border-t-0 hover:bg-background">
       <Link href={row.openPath} className="group flex h-10 min-w-0 flex-1 items-center gap-3 px-4">
         <span className="min-w-0 truncate font-mono text-xs">{row.repo}</span>
+        {row.isNew && (
+          <span className="shrink-0 text-[10px] font-medium text-petrol" data-tip="Mapped by someone else since you last opened it">
+            New
+          </span>
+        )}
         {row.branch && <span className="shrink-0 font-mono text-[10px] text-muted">{row.branch}</span>}
         <span className="shrink-0 text-[10px] text-muted" title={row.commit ?? undefined}>
           {versionName(row.version)}
         </span>
+        <AttributionLine attribution={row.attribution} className="hidden shrink-0 text-[10px] text-muted sm:inline" />
         <span className={`min-w-0 flex-1 truncate text-right text-[11px] ${failed ? "text-danger" : "text-muted"}`}>
           {note ?? (row.files !== null ? <span className="font-mono text-[10px] tabular-nums">{formatCount(row.files)} files</span> : null)}
         </span>

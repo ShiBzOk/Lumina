@@ -5,11 +5,7 @@ import { analysisPath } from "@/lib/analysis-path";
 import { listProjectAnalyses, listRepositories, loadGraph, type Analysis } from "@/lib/analyses";
 import type { Address } from "@/lib/map/view";
 import type { AnalysisStatus } from "@/lib/stages";
-
-// When an analysis was asked for, in the server's own time zone: this is a
-// local app, so that is the reader's. Formatted here so the browser never
-// renders it differently.
-const RAN = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+import { exactTime } from "@/lib/when";
 
 /**
  * One analysis from start to finish: its progress while it runs, its map once
@@ -36,7 +32,7 @@ export async function AnalysisScreen({ analysis, address }: { analysis: Analysis
       commit: a.commit_sha,
       branch: a.branch,
       status: a.status,
-      ran: RAN.format(new Date(a.created_at)),
+      ran: exactTime(a.created_at),
     });
     // The list is capped; the one being looked at is always in it.
     const analyses = history.some((a) => a.id === analysis.id) ? history.map(option) : [...history, analysis].map(option);
@@ -45,7 +41,14 @@ export async function AnalysisScreen({ analysis, address }: { analysis: Analysis
       <MapWorkspace
         // Each analysis opens on its own address; nothing carries over from the last one.
         key={analysis.id}
-        meta={{ analysisId: analysis.id, repo, branch: analysis.branch, commit: analysis.commit_sha }}
+        meta={{
+          analysisId: analysis.id,
+          projectId: analysis.project_id,
+          repo,
+          branch: analysis.branch,
+          commit: analysis.commit_sha,
+          attribution: analysis.attribution,
+        }}
         repositories={repositories.map((r) => ({ id: r.open, path: r.openPath, repo: r.repo, branch: r.branch, status: r.status }))}
         analyses={analyses}
         latest={history.find((a) => a.status === "complete")?.id ?? null}

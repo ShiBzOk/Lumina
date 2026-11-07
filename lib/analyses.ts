@@ -1,8 +1,10 @@
+import { auth } from "@clerk/nextjs/server";
 import { connection } from "next/server";
 import { analysisPath } from "@/lib/analysis-path";
 import { MODEL_ROLES, type ModelRole } from "@/lib/map/frameworks";
 import { createServerSupabase } from "@/lib/supabase";
 import { isStale, KEPT_ANALYSES } from "@/lib/stages";
+import { attribution } from "@/lib/when";
 import { readCoverage, readRoutesWithheld } from "@/parser/io";
 import {
   EXCLUDED_REASONS,
@@ -33,28 +35,44 @@ const PROJECT = "project:projects!analyses_project_id_org_id_fkey(repo_owner, re
 
 const ANALYSES = "analyses!analyses_project_id_org_id_fkey";
 
+const USER_ID = /^[A-Za-z0-9_]+$/;
+
 /**
  * One entry per repository: its latest analysis, whatever state that is in,
- * and which analysis opening the repository should land on.
+ * which analysis opening the repository should land on, and whether someone
+ * else finished a map of it since this person last opened one.
  */
 export async function listRepositories() {
-  const supabase = await reader();
+  const [supabase, { userId }] = await Promise.all([reader(), auth()]);
+  // Interpolated into a filter below, so it must be only what Clerk ids are made of.
+  if (!userId || !USER_ID.test(userId)) throw new Error("No signed-in user to list repositories for");
   const { data, error } = await supabase
     .from("projects")
     .select(
       `id, repo_owner, repo_name,
-       latest:${ANALYSES}(id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, version, file_count, package_count, created_at),
-       finished:${ANALYSES}(id, version)`,
+       latest:${ANALYSES}(id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, version, file_count, package_count, created_at, finished_at, started_by_name),
+       finished:${ANALYSES}(id, version),
+       others:${ANALYSES}(finished_at),
+       visit:last_visits!last_visits_project_id_org_id_fkey(visited_at)`,
     )
     .order("created_at", { referencedTable: "latest", ascending: false })
     .limit(1, { referencedTable: "latest" })
     .eq("finished.status", "complete")
     .order("created_at", { referencedTable: "finished", ascending: false })
     .limit(1, { referencedTable: "finished" })
+    // The newest map someone else made. Analyses from before authors were
+    // recorded count as someone else's, but they all finished before any visit
+    // was recorded, so they never mark anything.
+    .eq("others.status", "complete")
+    .or(`started_by.is.null,started_by.neq.${userId}`, { referencedTable: "others" })
+    .order("finished_at", { referencedTable: "others", ascending: false, nullsFirst: false })
+    .limit(1, { referencedTable: "others" })
+    // The policy returns this person's own visit and nobody else's, so there is at most one.
+    .limit(1, { referencedTable: "visit" })
     .limit(100);
   if (error) throw new Error(`Could not list repositories: ${error.message}`);
 
-  // Staleness is decided once, on the server, so it and the browser agree on it.
+  // Staleness and times are decided once, on the server, so it and the browser agree on them.
   const now = Date.now();
   return data
     .flatMap((p) => {
@@ -62,11 +80,17 @@ export async function listRepositories() {
       if (!latest) return [];
       const live = latest.status === "queued" || latest.status === "running";
       const opened = live ? latest : (p.finished[0] ?? latest);
+      const visited = p.visit[0]?.visited_at;
+      const otherFinished = p.others[0]?.finished_at;
       return [
         {
           ...latest,
+          projectId: p.id,
           repo: `${p.repo_owner}/${p.repo_name}`,
           stale: isStale(latest.status, latest.stage_changed_at, now),
+          attribution: attribution(latest, now),
+          // Never opened means no marker: to a newcomer everything is unseen.
+          isNew: visited !== undefined && otherFinished != null && Date.parse(otherFinished) > Date.parse(visited),
           // A run in progress opens on its progress; otherwise the latest map,
           // so a failed re-run doesn't stand between a repository and its map.
           open: opened.id,
@@ -101,12 +125,14 @@ export async function getAnalysis(id: string) {
   const { data, error } = await supabase
     .from("analyses")
     .select(
-      `id, project_id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, version, adapter, coverage, routes_withheld, created_at, ${PROJECT}`,
+      `id, project_id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, version, adapter, coverage, routes_withheld, created_at, finished_at, started_by_name, ${PROJECT}`,
     )
     .eq("id", id)
     .maybeSingle();
   if (error) throw new Error(`Could not read the analysis: ${error.message}`);
-  return data && { ...data, stale: isStale(data.status, data.stage_changed_at, Date.now()) };
+  if (!data) return null;
+  const now = Date.now();
+  return { ...data, stale: isStale(data.status, data.stage_changed_at, now), attribution: attribution(data, now) };
 }
 
 export type Analysis = NonNullable<Awaited<ReturnType<typeof getAnalysis>>>;

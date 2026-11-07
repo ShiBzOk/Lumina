@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AccountButton } from "@/components/account-button";
 import { Logo } from "@/components/logo";
-import { explain, loadCompareSide } from "@/app/analyses/actions";
+import { explain, loadCompareSide, recordVisit } from "@/app/analyses/actions";
+import { AttributionLine } from "@/components/attribution-line";
 import { compareAnalyses, type ComparedAnalysis } from "@/lib/map/compare";
 import { frameworkOf, MODEL_CATEGORIES, type ModelRole } from "@/lib/map/frameworks";
 import { highlight, isFiltering, matches, NO_FILTER, sameSelection, type Filter, type Selection } from "@/lib/map/highlight";
@@ -14,6 +15,7 @@ import { MAX_VISIBLE_ROWS } from "@/lib/map/layout";
 import { buildMap, fileTypeOf } from "@/lib/map/model";
 import { DEFAULT_VIEW, readView, writeView, type Address, type View } from "@/lib/map/view";
 import { summarize } from "@/lib/map/summary";
+import type { Attribution } from "@/lib/when";
 import type { Coverage, Edge, ImportRecord, RepoFile, Route, WithheldRoute } from "@/parser/types";
 import { Canvas, type CanvasHandle } from "./canvas";
 import { CategoryRail } from "./category-rail";
@@ -32,7 +34,7 @@ import { CopyLink } from "./copy-link";
 import { MissingFromLink } from "./missing-from-link";
 
 interface MapWorkspaceProps {
-  meta: { analysisId: string; repo: string; branch: string | null; commit: string };
+  meta: { analysisId: string; projectId: string; repo: string; branch: string | null; commit: string; attribution: Attribution };
   /** The organization's repositories, for switching between them. */
   repositories: RepositoryOption[];
   /** This repository's analyses, newest first, this one among them. */
@@ -71,6 +73,17 @@ export function MapWorkspace({
   labels,
   address,
 }: MapWorkspaceProps) {
+  // Opening a map is a visit to its repository: one write, when it opens, and
+  // none for anything done on it after. The page keys this component by
+  // analysis, so switching to another version is another open. The ref holds
+  // through development's double-run of effects, which would otherwise write twice.
+  const visited = useRef(false);
+  useEffect(() => {
+    if (visited.current) return;
+    visited.current = true;
+    void recordVisit(meta.projectId);
+  }, [meta.projectId]);
+
   const modelRoles = useMemo(() => new Map(labels.map((l) => [l.path, l.role])), [labels]);
   const map = useMemo(() => buildMap(files, edges, modelRoles), [files, edges, modelRoles]);
   const finished = useMemo(() => analyses.filter((a) => a.status === "complete"), [analyses]);
@@ -286,6 +299,7 @@ export function MapWorkspace({
           <div className="shrink-0">
             <AnalysisSwitcher current={current} latest={latest} analyses={analyses} />
           </div>
+          <AttributionLine attribution={meta.attribution} className="ml-2 hidden min-w-0 truncate text-[11px] text-muted lg:inline" />
         </div>
 
         <div className="flex flex-1 shrink-0 items-center justify-end gap-2">

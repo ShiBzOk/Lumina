@@ -36,6 +36,8 @@ export type Database = {
           stage: Database["public"]["Enums"]["analysis_stage"] | null
           stage_changed_at: string
           stage_message: string | null
+          started_by: string | null
+          started_by_name: string | null
           status: Database["public"]["Enums"]["analysis_status"]
           version: number
         }
@@ -57,6 +59,8 @@ export type Database = {
           stage?: Database["public"]["Enums"]["analysis_stage"] | null
           stage_changed_at?: string
           stage_message?: string | null
+          started_by?: string | null
+          started_by_name?: string | null
           status?: Database["public"]["Enums"]["analysis_status"]
           version?: number
         }
@@ -78,6 +82,8 @@ export type Database = {
           stage?: Database["public"]["Enums"]["analysis_stage"] | null
           stage_changed_at?: string
           stage_message?: string | null
+          started_by?: string | null
+          started_by_name?: string | null
           status?: Database["public"]["Enums"]["analysis_status"]
           version?: number
         }
@@ -410,6 +416,42 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      last_visits: {
+        Row: {
+          org_id: string
+          project_id: string
+          user_id: string
+          visited_at: string
+        }
+        Insert: {
+          org_id: string
+          project_id: string
+          user_id: string
+          visited_at: string
+        }
+        Update: {
+          org_id?: string
+          project_id?: string
+          user_id?: string
+          visited_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "last_visits_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "last_visits_project_id_org_id_fkey"
+            columns: ["project_id", "org_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id", "org_id"]
           },
         ]
       }

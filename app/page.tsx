@@ -24,6 +24,8 @@ async function Repositories({ searchParams }: { searchParams: PageProps<"/">["se
     files: a.file_count,
     packages: a.package_count,
     stale: a.stale,
+    attribution: a.attribution,
+    isNew: a.isNew,
   }));
   // Keyed by organization, so switching mounts a fresh list, which settles in
   // rather than being swapped under the pointer.

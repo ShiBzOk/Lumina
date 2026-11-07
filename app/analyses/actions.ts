@@ -2,6 +2,7 @@
 
 import { analysisPath } from "@/lib/analysis-path";
 import { auth } from "@clerk/nextjs/server";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { MODEL } from "@/lib/ai/client";
@@ -41,6 +42,26 @@ async function organization() {
 }
 
 /**
+ * Who is starting a run, as their session says at this moment. The name is
+ * copied onto the analysis and never looked up again. It is for attribution
+ * on screen only and never reaches a model.
+ */
+async function starter(): Promise<Author> {
+  const { userId, sessionClaims } = await auth();
+  const name = sessionClaims?.user_name;
+  if (!userId) throw new Error("No signed-in user on the session");
+  if (!name) {
+    throw new Error("Session token has no user_name claim. Add it in Clerk Dashboard → Sessions → Customize session token.");
+  }
+  return { id: userId, name };
+}
+
+interface Author {
+  id: string;
+  name: string;
+}
+
+/**
  * A repository at a branch, a commit hash, or its default branch. Each commit
  * is analysed once: one already analysed lands on the existing analysis
  * without touching it, and only a new one starts a run.
@@ -53,7 +74,7 @@ export async function submitRepository(_prev: SubmitState, form: FormData): Prom
   if (!repo) return { ...state, error: "Enter a GitHub repository as owner/name or a github.com URL." };
   if (refInput && !/^[^\s~^:?*[\\]+$/.test(refInput)) return { ...state, error: `"${refInput}" isn't a valid branch name or commit hash.` };
 
-  const { orgId, name } = await organization();
+  const [{ orgId, name }, by] = await Promise.all([organization(), starter()]);
   const db = createWriterSupabase();
 
   const org = await db.from("organizations").upsert({ id: orgId, name }, { onConflict: "id" });
@@ -72,19 +93,19 @@ export async function submitRepository(_prev: SubmitState, form: FormData): Prom
     .single();
   if (projectError) throw new Error(`Could not read the repository back: ${projectError.message}`);
 
-  const error = await analyse({ orgId, projectId: projectRow.id, repo, ref: refInput || null });
+  const error = await analyse({ orgId, by, projectId: projectRow.id, repo, ref: refInput || null });
   return { ...state, error };
 }
 
 /** A new analysis of the same branch at its tip. If that commit was already analysed, it opens instead. */
 export async function remapAnalysis(analysisId: string): Promise<RemapState> {
-  const { orgId } = await organization();
+  const [{ orgId }, by] = await Promise.all([organization(), starter()]);
   // Read as the user, so the policy decides whether this analysis is theirs.
   const analysis = await getAnalysis(analysisId);
   if (!analysis || !analysis.project) return { error: "No such analysis" };
   if (!analysis.branch) return { error: "This analysis was asked for by commit, so it has no branch to follow." };
   const repo = { owner: analysis.project.repo_owner, name: analysis.project.repo_name };
-  return { error: await analyse({ orgId, projectId: analysis.project_id, repo, ref: analysis.branch }) };
+  return { error: await analyse({ orgId, by, projectId: analysis.project_id, repo, ref: analysis.branch }) };
 }
 
 /**
@@ -94,8 +115,8 @@ export async function remapAnalysis(analysisId: string): Promise<RemapState> {
  * refusing the lookup creates nothing and comes back as the reason, in its own
  * words. Redirects on success; returns only an error.
  */
-async function analyse(target: { orgId: string; projectId: string; repo: RepoRef; ref: string | null }): Promise<string> {
-  const { orgId, projectId, repo, ref } = target;
+async function analyse(target: { orgId: string; by: Author; projectId: string; repo: RepoRef; ref: string | null }): Promise<string> {
+  const { orgId, by, projectId, repo, ref } = target;
   let commit: ResolvedCommit;
   try {
     commit = await resolveCommit(repo, ref);
@@ -109,7 +130,7 @@ async function analyse(target: { orgId: string; projectId: string; repo: RepoRef
 
   const inserted = await db
     .from("analyses")
-    .insert({ org_id: orgId, project_id: projectId, branch: commit.branch, commit_sha: commit.sha })
+    .insert({ org_id: orgId, project_id: projectId, branch: commit.branch, commit_sha: commit.sha, started_by: by.id, started_by_name: by.name })
     .select("id, version")
     .single();
   if (inserted.error) {
@@ -132,7 +153,7 @@ async function analyse(target: { orgId: string; projectId: string; repo: RepoRef
  * analysis; a stale run counts as no longer live.
  */
 export async function rerunAnalysis(analysisId: string): Promise<void> {
-  const { orgId } = await organization();
+  const [{ orgId }, by] = await Promise.all([organization(), starter()]);
   // Read as the user, so the policy decides whether this analysis is theirs.
   const analysis = await getAnalysis(analysisId);
   if (!analysis || !analysis.project) throw new Error("No such analysis");
@@ -141,7 +162,7 @@ export async function rerunAnalysis(analysisId: string): Promise<void> {
   // Rows from before this phase that failed before reaching a commit have none
   // to run again at, so they start a new analysis the ordinary way.
   if (!analysis.commit_sha) {
-    const error = await analyse({ orgId, projectId: analysis.project_id, repo, ref: analysis.branch });
+    const error = await analyse({ orgId, by, projectId: analysis.project_id, repo, ref: analysis.branch });
     throw new Error(error);
   }
 
@@ -168,6 +189,10 @@ export async function rerunAnalysis(analysisId: string): Promise<void> {
       file_count: null,
       package_count: null,
       attempt,
+      // Running it again is starting it, so the map it makes is attributed to
+      // whoever did, not to whoever's attempt failed.
+      started_by: by.id,
+      started_by_name: by.name,
       // Set outright: a stale queued row re-queued changes no status, stage or
       // message, so the trigger alone would leave it looking stale.
       stage_changed_at: now.toISOString(),
@@ -293,4 +318,26 @@ export async function loadCompareSide(headId: string, baseId: string): Promise<C
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The person opened a map of this repository. Called once per open, never on
+ * a timer, scroll or selection. Written as the person, so the policy alone
+ * decides it may only be their own row in their own organization; the
+ * repository's key includes the organization, so another organization's
+ * repository can't be named here either.
+ */
+export async function recordVisit(projectId: string): Promise<void> {
+  if (!UUID.test(projectId)) return;
+  const { userId, orgId } = await auth();
+  if (!userId || !orgId) return;
+  const { error } = await createServerSupabase()
+    .from("last_visits")
+    // This server's clock, the same one a run stamps finished_at with, so the two compare.
+    .upsert({ org_id: orgId, project_id: projectId, user_id: userId, visited_at: new Date().toISOString() }, { onConflict: "project_id,user_id" });
+  if (error) throw new Error(`Could not record the visit: ${error.message}`);
+  // The list kept in the browser still shows the marker; going back to it should not.
+  revalidatePath("/");
 }
