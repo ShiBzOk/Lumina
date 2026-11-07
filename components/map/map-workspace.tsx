@@ -119,17 +119,33 @@ export function MapWorkspace({
 
   // Compare is a mode of the whole right-hand pane. The head is always the
   // analysis on screen; choosing another head goes to that analysis's map.
+  // Base and head are never the same analysis: comparing one with itself says
+  // nothing, so every way of choosing either side steers around it.
   const router = useRouter();
-  const [base, setBase] = useState<string | null>(restored.view.compare);
+  // A link naming this analysis as its own base opens without Compare.
+  const [base, setBase] = useState<string | null>(restored.view.compare === meta.analysisId ? null : restored.view.compare);
+  const openCompare = (head: string, against: string) =>
+    router.push(`${analyses.find((a) => a.id === head)?.path ?? `/analyses/${head}`}${writeView({ ...DEFAULT_VIEW, compare: against })}`);
   const toggleCompare = () => {
     if (base !== null) return setBase(null);
-    // The one before this, against this. With nothing earlier, this against itself, which says so.
+    // From the one before this, to this. On the oldest there is none before,
+    // so it goes to the next newer map, from this one, keeping older → newer.
     const at = finished.findIndex((a) => a.id === meta.analysisId);
-    setBase(finished[at + 1]?.id ?? meta.analysisId);
-    setPaneOpen(true);
+    const older = finished[at + 1];
+    if (older) {
+      setBase(older.id);
+      setPaneOpen(true);
+      return;
+    }
+    const newer = finished[at - 1];
+    if (newer) openCompare(newer.id, meta.analysisId);
   };
+  const chooseBase = (id: string) => {
+    if (id !== meta.analysisId) setBase(id);
+  };
+  // Choosing the base as the head swaps the two, which is also what the swap button does.
   const chooseHead = (head: string) => {
-    if (head !== meta.analysisId && base !== null) router.push(`${analyses.find((a) => a.id === head)?.path ?? `/analyses/${head}`}${writeView({ ...DEFAULT_VIEW, compare: base })}`);
+    if (head !== meta.analysisId && base !== null) openCompare(head, head === base ? meta.analysisId : base);
   };
 
   // This analysis's own address; the view goes after it.
@@ -384,7 +400,7 @@ export function MapWorkspace({
               state={compareState}
               inHead={headPaths}
               hovered={hovered}
-              onBase={setBase}
+              onBase={chooseBase}
               onHead={chooseHead}
               onReveal={reveal}
               onHover={hover}

@@ -55,21 +55,33 @@ export function ComparePane(props: ComparePaneProps) {
         </button>
       </div>
 
-      <div className="grid shrink-0 grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5 border-b border-border px-3 py-2.5 text-[11px]">
-        <span className="text-muted">Base</span>
-        <AnalysisSelect analyses={analyses} value={base} onChange={onBase} />
-        <span className="text-muted">Head</span>
-        <AnalysisSelect analyses={analyses} value={head} onChange={onHead} />
-        <span />
-        <p className="text-[10px] leading-snug text-muted">The map shows the head.</p>
+      {/* Read as a sentence: changes from one analysis to another. "Base" and
+          "head" stay the names in code; on screen they are just from and to. */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5 text-[11px]">
+        <div className="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5">
+          <span className="text-muted">From</span>
+          {/* The analysis on screen is never offered as its own base. */}
+          <AnalysisSelect analyses={analyses.filter((a) => a.id !== head)} value={base} onChange={onBase} label="Compare from" />
+          <span className="text-muted">To</span>
+          <AnalysisSelect analyses={analyses} value={head} onChange={onHead} label="Compare to" />
+        </div>
+        <button
+          type="button"
+          onClick={() => onHead(base)}
+          data-tip="Swap from and to"
+          aria-label="Swap from and to"
+          className="shrink-0 rounded-md p-1.5 text-muted ring-1 ring-border hover:bg-background hover:text-foreground"
+        >
+          <Icon name="swap" className="size-3.5" />
+        </button>
       </div>
+      <p className="shrink-0 border-b border-border px-3 py-2 text-[10px] leading-snug text-muted">
+        What changed from {labelOf(base)} to {labelOf(head)}. The map shows {labelOf(head)}; files added or changed since{" "}
+        {labelOf(base)} are marked on it.
+      </p>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-        {base === head ? (
-          <Plain>
-            Base and head are the same analysis, {labelOf(head)}. Nothing changed.
-          </Plain>
-        ) : state.status === "loading" ? (
+        {state.status === "loading" ? (
           <Plain>
             Reading {labelOf(base)}…
           </Plain>
@@ -83,10 +95,21 @@ export function ComparePane(props: ComparePaneProps) {
   );
 }
 
-function AnalysisSelect({ analyses, value, onChange }: { analyses: readonly AnalysisOption[]; value: string; onChange: (id: string) => void }) {
+function AnalysisSelect({
+  analyses,
+  value,
+  onChange,
+  label,
+}: {
+  analyses: readonly AnalysisOption[];
+  value: string;
+  onChange: (id: string) => void;
+  label: string;
+}) {
   return (
     <select
       value={value}
+      aria-label={label}
       onChange={(e) => onChange(e.target.value)}
       className="min-w-0 rounded-md border border-border bg-surface px-1.5 py-1 font-mono text-[11px] hover:bg-background"
     >
