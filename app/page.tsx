@@ -3,16 +3,19 @@ import { Suspense } from "react";
 import { RepositoryBrowser, type RepositoryRow } from "@/components/dashboard/repository-browser";
 import { Landing } from "@/components/landing/landing";
 import { WorkspaceHeader } from "@/components/workspace-header";
-import { listAnalyses } from "@/lib/analyses";
+import { listRepositories } from "@/lib/analyses";
 import { PageTransition } from "@/components/page-transition";
 
 async function Repositories({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
   // `/?add` arrives from the map's repository menu, asking for the form straight away.
-  const [analyses, params, { orgId }] = await Promise.all([listAnalyses(), searchParams, auth()]);
-  const rows: RepositoryRow[] = analyses.map((a) => ({
+  const [repositories, params, { orgId }] = await Promise.all([listRepositories(), searchParams, auth()]);
+  // One row per repository, describing its latest analysis.
+  const rows: RepositoryRow[] = repositories.map((a) => ({
     id: a.id,
-    repo: a.project ? `${a.project.repo_owner}/${a.project.repo_name}` : "(unknown repository)",
+    open: a.open,
+    repo: a.repo,
     branch: a.branch,
+    commit: a.commit_sha,
     status: a.status,
     stage: a.stage,
     message: a.status === "failed" ? a.error : a.stage_message,

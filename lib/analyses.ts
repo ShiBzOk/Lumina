@@ -1,7 +1,7 @@
 import { connection } from "next/server";
 import { MODEL_ROLES, type ModelRole } from "@/lib/map/frameworks";
 import { createServerSupabase } from "@/lib/supabase";
-import { isStale } from "@/lib/stages";
+import { isStale, KEPT_ANALYSES } from "@/lib/stages";
 import { readCoverage, readRoutesWithheld } from "@/parser/io";
 import {
   EXCLUDED_REASONS,
@@ -30,23 +30,64 @@ async function reader() {
 
 const PROJECT = "project:projects!analyses_project_id_org_id_fkey(repo_owner, repo_name, description)";
 
-export async function listAnalyses() {
+const ANALYSES = "analyses!analyses_project_id_org_id_fkey";
+
+/**
+ * One entry per repository: its latest analysis, whatever state that is in,
+ * and which analysis opening the repository should land on.
+ */
+export async function listRepositories() {
+  const supabase = await reader();
+  const { data, error } = await supabase
+    .from("projects")
+    .select(
+      `id, repo_owner, repo_name,
+       latest:${ANALYSES}(id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, file_count, package_count, created_at),
+       finished:${ANALYSES}(id)`,
+    )
+    .order("created_at", { referencedTable: "latest", ascending: false })
+    .limit(1, { referencedTable: "latest" })
+    .eq("finished.status", "complete")
+    .order("created_at", { referencedTable: "finished", ascending: false })
+    .limit(1, { referencedTable: "finished" })
+    .limit(100);
+  if (error) throw new Error(`Could not list repositories: ${error.message}`);
+
+  // Staleness is decided once, on the server, so it and the browser agree on it.
+  const now = Date.now();
+  return data
+    .flatMap((p) => {
+      const [latest] = p.latest;
+      if (!latest) return [];
+      const live = latest.status === "queued" || latest.status === "running";
+      return [
+        {
+          ...latest,
+          repo: `${p.repo_owner}/${p.repo_name}`,
+          stale: isStale(latest.status, latest.stage_changed_at, now),
+          // A run in progress opens on its progress; otherwise the latest map,
+          // so a failed re-run doesn't stand between a repository and its map.
+          open: live ? latest.id : (p.finished[0]?.id ?? latest.id),
+        },
+      ];
+    })
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+}
+
+export type RepositoryListItem = Awaited<ReturnType<typeof listRepositories>>[number];
+
+/** One repository's analyses, newest first. A finishing run may briefly make it one more than are kept. */
+export async function listProjectAnalyses(projectId: string) {
   const supabase = await reader();
   const { data, error } = await supabase
     .from("analyses")
-    .select(
-      `id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, file_count, package_count, created_at, ${PROJECT}`,
-    )
+    .select("id, status, branch, commit_sha, created_at")
+    .eq("project_id", projectId)
     .order("created_at", { ascending: false })
-    .limit(100);
-
-  if (error) throw new Error(`Could not list analyses: ${error.message}`);
-  // Staleness is decided once, on the server, so it and the browser agree on it.
-  const now = Date.now();
-  return data.map((a) => ({ ...a, stale: isStale(a.status, a.stage_changed_at, now) }));
+    .limit(KEPT_ANALYSES + 5);
+  if (error) throw new Error(`Could not list the repository's analyses: ${error.message}`);
+  return data;
 }
-
-export type AnalysisListItem = Awaited<ReturnType<typeof listAnalyses>>[number];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

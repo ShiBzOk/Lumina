@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useFormStatus } from "react-dom";
-import { rerunAnalysis } from "@/app/analyses/actions";
+import { useActionState, useEffect, useMemo, useState } from "react";
+import { remapAnalysis, type RemapState } from "@/app/analyses/actions";
 import { Icon } from "@/components/map/icons";
 import { readHeadCheck, type HeadCheck } from "@/lib/head-check";
 
@@ -30,21 +29,27 @@ export function useHeadCheck(analysisId: string, enabled: boolean): HeadCheck | 
   return enabled && check?.id === analysisId ? check.result : null;
 }
 
-/** Re-runs the same analysis at the branch's tip; the run lands on its progress page. */
-export function RemapButton({ analysisId, className }: { analysisId: string; className: string }) {
-  return (
-    <form action={rerunAnalysis.bind(null, analysisId)} className="shrink-0">
-      <Submit className={className} />
-    </form>
-  );
-}
+const NO_ERROR: RemapState = { error: null };
 
-function Submit({ className }: { className: string }) {
-  const { pending } = useFormStatus();
+/**
+ * Analyses the branch's tip as a new analysis beside this one, landing on its
+ * progress, or on the existing analysis if that commit already has one. If
+ * GitHub refuses the lookup, nothing is created and its reason shows here.
+ */
+export function RemapButton({ analysisId, className }: { analysisId: string; className: string }) {
+  const remap = useMemo(() => remapAnalysis.bind(null, analysisId), [analysisId]);
+  const [state, action, pending] = useActionState(remap, NO_ERROR);
   return (
-    <button type="submit" disabled={pending} className={`flex items-center gap-1 disabled:opacity-60 ${className}`}>
-      <Icon name="refresh" className="size-3" />
-      {pending ? "Starting…" : "Re-map"}
-    </button>
+    <form action={action} className="flex min-w-0 shrink-0 items-center gap-2">
+      {state.error && (
+        <span className="max-w-72 truncate text-[11px] text-danger" title={state.error}>
+          {state.error}
+        </span>
+      )}
+      <button type="submit" disabled={pending} className={`flex shrink-0 items-center gap-1 disabled:opacity-60 ${className}`}>
+        <Icon name="refresh" className="size-3" />
+        {pending ? "Starting…" : "Re-map"}
+      </button>
+    </form>
   );
 }

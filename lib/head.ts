@@ -7,9 +7,8 @@ export async function checkHead(analysisId: string): Promise<HeadCheck> {
     // Read as the user, so the policy decides whether this analysis is theirs.
     const analysis = await getAnalysis(analysisId);
     if (!analysis || !analysis.project) return { state: "unknown", reason: "No such analysis" };
-    if (analysis.status !== "complete" || !analysis.commit_sha || !analysis.branch) {
-      return { state: "unknown", reason: "The analysis isn't complete" };
-    }
+    if (analysis.status !== "complete" || !analysis.commit_sha) return { state: "unknown", reason: "The analysis isn't complete" };
+    if (!analysis.branch) return { state: "unknown", reason: "It was asked for by commit, so there is no branch to follow" };
     const head = await headCommit({ owner: analysis.project.repo_owner, name: analysis.project.repo_name }, analysis.branch);
     return head === analysis.commit_sha ? { state: "current" } : { state: "moved", head };
   } catch (error) {

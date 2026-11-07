@@ -7,7 +7,7 @@ import { MODEL } from "@/lib/ai/client";
 import { aggregate, explainFile, explainFolder, type FolderFile } from "@/lib/ai/explain";
 import { getAnalysis, loadFileNeighbourhood, loadStructure } from "@/lib/analyses";
 import { fold } from "@/lib/map/fold";
-import { parseRepoInput } from "@/lib/pipeline/github";
+import { parseRepoInput, resolveCommit, type RepoRef, type ResolvedCommit } from "@/lib/pipeline/github";
 import { runAnalysis } from "@/lib/pipeline/run";
 import { STALE_AFTER_MS } from "@/lib/stages";
 import { createServerSupabase, createWriterSupabase } from "@/lib/supabase";
@@ -16,7 +16,13 @@ export interface SubmitState {
   error: string | null;
   /** What was typed, so a rejected submission doesn't empty the form. */
   repo: string;
-  branch: string;
+  /** A branch or a commit hash; empty for the default branch. */
+  ref: string;
+}
+
+/** A re-map that GitHub refused before anything was created says why, where it was asked. */
+export interface RemapState {
+  error: string | null;
 }
 
 // The organization every write is filed under, read off the verified token.
@@ -32,17 +38,17 @@ async function organization() {
 }
 
 /**
- * One analysis per repository. A URL already analysed lands on the existing
- * analysis without touching it; only a new one starts a run. The unique
- * constraint decides which case this is, so two tabs racing still make one row.
+ * A repository at a branch, a commit hash, or its default branch. Each commit
+ * is analysed once: one already analysed lands on the existing analysis
+ * without touching it, and only a new one starts a run.
  */
 export async function submitRepository(_prev: SubmitState, form: FormData): Promise<SubmitState> {
   const repoInput = String(form.get("repo") ?? "");
-  const branchInput = String(form.get("branch") ?? "").trim();
-  const state = { repo: repoInput, branch: branchInput };
+  const refInput = String(form.get("ref") ?? "").trim();
+  const state = { repo: repoInput, ref: refInput };
   const repo = parseRepoInput(repoInput);
   if (!repo) return { ...state, error: "Enter a GitHub repository as owner/name or a github.com URL." };
-  if (branchInput && !/^[^\s~^:?*[\\]+$/.test(branchInput)) return { ...state, error: `"${branchInput}" isn't a valid branch name.` };
+  if (refInput && !/^[^\s~^:?*[\\]+$/.test(refInput)) return { ...state, error: `"${refInput}" isn't a valid branch name or commit hash.` };
 
   const { orgId, name } = await organization();
   const db = createWriterSupabase();
@@ -63,34 +69,78 @@ export async function submitRepository(_prev: SubmitState, form: FormData): Prom
     .single();
   if (projectError) throw new Error(`Could not read the repository back: ${projectError.message}`);
 
+  const error = await analyse({ orgId, projectId: projectRow.id, repo, ref: refInput || null });
+  return { ...state, error };
+}
+
+/** A new analysis of the same branch at its tip. If that commit was already analysed, it opens instead. */
+export async function remapAnalysis(analysisId: string): Promise<RemapState> {
+  const { orgId } = await organization();
+  // Read as the user, so the policy decides whether this analysis is theirs.
+  const analysis = await getAnalysis(analysisId);
+  if (!analysis || !analysis.project) return { error: "No such analysis" };
+  if (!analysis.branch) return { error: "This analysis was asked for by commit, so it has no branch to follow." };
+  const repo = { owner: analysis.project.repo_owner, name: analysis.project.repo_name };
+  return { error: await analyse({ orgId, projectId: analysis.project_id, repo, ref: analysis.branch }) };
+}
+
+/**
+ * Resolves the commit first, so the row is inserted knowing it and the unique
+ * constraint on (repository, commit) decides whether this is a new analysis.
+ * Two people submitting the same commit at once still make one row. GitHub
+ * refusing the lookup creates nothing and comes back as the reason, in its own
+ * words. Redirects on success; returns only an error.
+ */
+async function analyse(target: { orgId: string; projectId: string; repo: RepoRef; ref: string | null }): Promise<string> {
+  const { orgId, projectId, repo, ref } = target;
+  let commit: ResolvedCommit;
+  try {
+    commit = await resolveCommit(repo, ref);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  const db = createWriterSupabase();
+  const described = await db.from("projects").update({ description: commit.description }).eq("id", projectId);
+  if (described.error) throw new Error(`Could not record the description: ${described.error.message}`);
+
   const inserted = await db
     .from("analyses")
-    .insert({ org_id: orgId, project_id: projectRow.id, branch: branchInput || null })
+    .insert({ org_id: orgId, project_id: projectId, branch: commit.branch, commit_sha: commit.sha })
     .select("id")
     .single();
-
   if (inserted.error) {
     if (inserted.error.code !== "23505") throw new Error(`Could not start the analysis: ${inserted.error.message}`);
-    const existing = await db.from("analyses").select("id").eq("project_id", projectRow.id).single();
+    const existing = await db.from("analyses").select("id").eq("project_id", projectId).eq("commit_sha", commit.sha).single();
     if (existing.error) throw new Error(`Could not find the existing analysis: ${existing.error.message}`);
     redirect(`/analyses/${existing.data.id}`);
   }
 
-  const request = { analysisId: inserted.data.id, projectId: projectRow.id, orgId, repo, branch: branchInput || null, attempt: 0 };
+  const request = { analysisId: inserted.data.id, projectId, orgId, repo, commit: commit.sha, branch: commit.branch, attempt: 0 };
   after(() => runAnalysis(request));
   redirect(`/analyses/${inserted.data.id}`);
 }
 
 /**
- * Re-running is a deliberate act from the analysis itself: the same row, its
- * previous rows cleared by the run. Refused while a run is live, so two runs
- * never write into one analysis; a stale run counts as no longer live.
+ * Runs an analysis that didn't finish again: one that failed or stopped
+ * responding, at the same commit, in the same row. Only its own partial rows
+ * are cleared. A finished analysis is never re-run; a newer commit is a new
+ * analysis. Refused while a run is live, so two runs never write into one
+ * analysis; a stale run counts as no longer live.
  */
 export async function rerunAnalysis(analysisId: string): Promise<void> {
   const { orgId } = await organization();
   // Read as the user, so the policy decides whether this analysis is theirs.
   const analysis = await getAnalysis(analysisId);
   if (!analysis || !analysis.project) throw new Error("No such analysis");
+  const { repo_owner, repo_name } = analysis.project;
+  const repo = { owner: repo_owner, name: repo_name };
+  // Rows from before this phase that failed before reaching a commit have none
+  // to run again at, so they start a new analysis the ordinary way.
+  if (!analysis.commit_sha) {
+    const error = await analyse({ orgId, projectId: analysis.project_id, repo, ref: analysis.branch });
+    throw new Error(error);
+  }
 
   // Claiming the next attempt is what fences off the previous run, which may
   // still be alive. Matching the attempt read here makes the claim a
@@ -121,21 +171,17 @@ export async function rerunAnalysis(analysisId: string): Promise<void> {
     })
     .eq("id", analysis.id)
     .eq("attempt", current.data.attempt)
-    .or(`status.in.(complete,failed),stage_changed_at.lt.${cutoff}`)
+    // A complete analysis is excluded outright: its stage stopped moving long
+    // ago, so the staleness test alone would let it be wiped and re-run.
+    .neq("status", "complete")
+    .or(`status.eq.failed,stage_changed_at.lt.${cutoff}`)
     .select("id");
   if (error) throw new Error(`Could not restart the analysis: ${error.message}`);
 
   if (data.length > 0) {
-    const { repo_owner, repo_name } = analysis.project;
+    const commit = analysis.commit_sha;
     after(() =>
-      runAnalysis({
-        analysisId: analysis.id,
-        projectId: analysis.project_id,
-        orgId,
-        repo: { owner: repo_owner, name: repo_name },
-        branch: analysis.branch,
-        attempt,
-      }),
+      runAnalysis({ analysisId: analysis.id, projectId: analysis.project_id, orgId, repo, commit, branch: analysis.branch, attempt }),
     );
   }
   redirect(`/analyses/${analysis.id}`);
@@ -164,12 +210,12 @@ export async function explain(analysisId: string, subject: ExplainSubject): Prom
     const { orgId } = await organization();
     const analysis = await getAnalysis(analysisId);
     if (!analysis || !analysis.project) return { ok: false, error: "No such analysis" };
-    if (analysis.status !== "complete" || !analysis.commit_sha || !analysis.branch) {
+    if (analysis.status !== "complete" || !analysis.commit_sha) {
       return { ok: false, error: "The analysis isn't complete, so there is nothing to explain yet" };
     }
     const repo = { owner: analysis.project.repo_owner, name: analysis.project.repo_name };
     const commit = analysis.commit_sha;
-    const dbs = { reader: createServerSupabase(), writer: createWriterSupabase(), orgId };
+    const dbs = { reader: createServerSupabase(), writer: createWriterSupabase(), orgId, analysisId: analysis.id };
 
     // A file needs only its own rows and its neighbours'. Reading the whole
     // graph for it made every click, cached or not, cost a full map load.

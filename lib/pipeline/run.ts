@@ -5,10 +5,10 @@ import path from "node:path";
 import type { TablesUpdate } from "@/lib/database.types";
 import { labelFiles, labelInputs } from "@/lib/ai/label";
 import { createWriterSupabase } from "@/lib/supabase";
-import { formatCount, type AnalysisStage } from "@/lib/stages";
+import { formatCount, KEPT_ANALYSES, type AnalysisStage } from "@/lib/stages";
 import { readParseResult } from "@/parser/io";
 import type { ParseResult } from "@/parser/types";
-import { downloadArchive, resolveCommit, selectFiles, type RepoRef } from "./github";
+import { downloadArchive, selectFiles, type RepoRef } from "./github";
 import { storeResult, toJson } from "./store";
 
 export interface RunRequest {
@@ -17,7 +17,9 @@ export interface RunRequest {
   /** Read off the verified Clerk token when the run was requested; the writer trusts nothing else. */
   orgId: string;
   repo: RepoRef;
-  /** Null for the repository's default branch. */
+  /** Resolved before the row was inserted; the run fetches exactly this and nothing else. */
+  commit: string;
+  /** What the commit was reached by, for messages. Null when it was asked for by hash. */
   branch: string | null;
   /** The attempt this run claimed. Every write is checked against it. */
   attempt: number;
@@ -85,31 +87,19 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
   };
 
   try {
-    await enter("fetching", `Looking up ${slug} on GitHub`);
-    // A re-run starts from nothing: rows from the previous run would otherwise
-    // sit beside the new ones. Edges, imports and roles go with their files.
-    // Only earlier attempts' files, so a run that lost its claim can't clear its successor's.
-    // The three clears and the GitHub lookup don't depend on each other, so they go together.
-    const clear = async (table: string, run: PromiseLike<{ error: { message: string } | null }>) => {
-      const { error } = await run;
-      if (error) throw new Error(`Could not clear the previous run's ${table}: ${error.message}`);
-    };
-    const [commit] = await Promise.all([
-      resolveCommit(repo, request.branch),
-      clear("files", db.from("files").delete().eq("analysis_id", analysisId).lt("attempt", attempt)),
-      clear("insights", db.from("insights").delete().eq("analysis_id", analysisId)),
-      clear("routes", db.from("routes").delete().eq("analysis_id", analysisId)),
-    ]);
-    await update({ branch: commit.branch, commit_sha: commit.sha });
-    {
-      const { error } = await db.from("projects").update({ description: commit.description }).eq("id", request.projectId);
-      if (error) throw new Error(`Could not record the description: ${error.message}`);
-    }
-    const downloading = `Downloading ${slug}@${commit.sha.slice(0, 7)} (${commit.branch})`;
+    const downloading = `Downloading ${slug}@${request.commit.slice(0, 7)}` + (request.branch ? ` (${request.branch})` : "");
     await enter("fetching", downloading);
+    // Only this analysis's own rows, left by an earlier attempt at it that
+    // stopped partway. Another analysis is touched only once this run has
+    // finished, by `prune`. Routes, edges, imports and roles go with their files, and only
+    // earlier attempts' files, so a run that lost its claim can't clear its successor's.
+    {
+      const { error } = await db.from("files").delete().eq("analysis_id", analysisId).lt("attempt", attempt);
+      if (error) throw new Error(`Could not clear an earlier attempt's files: ${error.message}`);
+    }
     const archive = path.join(work, "archive.tar.gz");
     const download = live();
-    const bytes = await downloadArchive(repo, commit.sha, archive, (received) => download.say(`${downloading}: ${size(received)}`));
+    const bytes = await downloadArchive(repo, request.commit, archive, (received) => download.say(`${downloading}: ${size(received)}`));
     await download.settle();
 
     await enter("selecting", `Extracting ${size(bytes)} archive`);
@@ -172,6 +162,7 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
       file_count: result.files.length,
       package_count: new Set(result.files.flatMap((f) => f.package ?? [])).size,
     });
+    await prune(db, request);
   } catch (error) {
     if (error instanceof Superseded) return;
     const reason = error instanceof Error ? error.message : String(error);
@@ -189,6 +180,33 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
   } finally {
     await fs.rm(work, { recursive: true, force: true });
   }
+}
+
+/**
+ * Removes the repository's analyses beyond the most recent KEPT_ANALYSES.
+ * Only called once this run is complete, so a run that fails never removes
+ * anything; its own analysis is the newest and is never among those removed.
+ * Everything an analysis owns, explanations included, goes with it by cascade.
+ * By then the run has succeeded, so a failure here is logged, not turned into
+ * a failed analysis; the next finished run removes what this one couldn't.
+ */
+async function prune(db: ReturnType<typeof createWriterSupabase>, request: RunRequest): Promise<void> {
+  const { data, error } = await db
+    .from("analyses")
+    .select("id")
+    .eq("project_id", request.projectId)
+    .neq("id", request.analysisId)
+    .order("created_at", { ascending: false })
+    // Its own analysis is one of the kept, so the others keep one fewer.
+    .range(KEPT_ANALYSES - 1, KEPT_ANALYSES + 99);
+  if (error) {
+    console.error(`Analysis ${request.analysisId}: could not list older analyses to remove: ${error.message}`);
+    return;
+  }
+  if (data.length === 0) return;
+  const removed = await db.from("analyses").delete().in("id", data.map((a) => a.id));
+  if (removed.error) console.error(`Analysis ${request.analysisId}: could not remove ${data.length} older analyses: ${removed.error.message}`);
+  else console.log(`Analysis ${request.analysisId}: removed ${data.length} analyses past the ${KEPT_ANALYSES} kept`);
 }
 
 function size(bytes: number): string {

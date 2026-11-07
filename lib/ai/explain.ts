@@ -92,6 +92,12 @@ export interface ExplainDbs {
   reader: Db;
   writer: Db;
   orgId: string;
+  /**
+   * The analysis the explanation is written in and stays attached to. The key
+   * matching in another analysis would mean only that the inputs match there;
+   * the explanation was still written for this one's graph.
+   */
+  analysisId: string;
 }
 
 function cache<S>(dbs: ExplainDbs, keyOf: (s: S) => string) {
@@ -100,6 +106,7 @@ function cache<S>(dbs: ExplainDbs, keyOf: (s: S) => string) {
       const { data, error } = await dbs.reader
         .from("explanations")
         .select("body, removed_sentences")
+        .eq("analysis_id", dbs.analysisId)
         .eq("model", MODEL)
         .eq("key", keyOf(s))
         .maybeSingle();
@@ -110,8 +117,15 @@ function cache<S>(dbs: ExplainDbs, keyOf: (s: S) => string) {
       const { error } = await dbs.writer
         .from("explanations")
         .upsert(
-          { org_id: dbs.orgId, model: MODEL, key: keyOf(s), body: value.body, removed_sentences: value.removedSentences },
-          { onConflict: "org_id,model,key", ignoreDuplicates: true },
+          {
+            org_id: dbs.orgId,
+            analysis_id: dbs.analysisId,
+            model: MODEL,
+            key: keyOf(s),
+            body: value.body,
+            removed_sentences: value.removedSentences,
+          },
+          { onConflict: "analysis_id,model,key", ignoreDuplicates: true },
         );
       if (error) throw new Error(`Could not cache the explanation: ${error.message}`);
     },

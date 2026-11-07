@@ -156,6 +156,7 @@ export type Database = {
       }
       explanations: {
         Row: {
+          analysis_id: string
           body: string
           created_at: string
           id: string
@@ -165,6 +166,7 @@ export type Database = {
           removed_sentences: number
         }
         Insert: {
+          analysis_id: string
           body: string
           created_at?: string
           id?: string
@@ -174,6 +176,7 @@ export type Database = {
           removed_sentences?: number
         }
         Update: {
+          analysis_id?: string
           body?: string
           created_at?: string
           id?: string
@@ -183,6 +186,13 @@ export type Database = {
           removed_sentences?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "explanations_analysis_id_org_id_fkey"
+            columns: ["analysis_id", "org_id"]
+            isOneToOne: false
+            referencedRelation: "analyses"
+            referencedColumns: ["id", "org_id"]
+          },
           {
             foreignKeyName: "explanations_org_id_fkey"
             columns: ["org_id"]

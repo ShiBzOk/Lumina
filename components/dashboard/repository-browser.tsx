@@ -9,10 +9,16 @@ import { PetrolBand } from "@/components/petrol-band";
 import { formatCount, sameEvent, STAGE_LABEL, type AnalysisStage, type AnalysisStatus } from "@/lib/stages";
 import { useAnalysisStage } from "@/lib/use-analysis-stage";
 
+/** A repository, described by its latest analysis. */
 export interface RepositoryRow {
+  /** The latest analysis. */
   id: string;
+  /** Where opening the repository lands: the latest map, or a run in progress. */
+  open: string;
   repo: string;
+  /** Null when the latest analysis was asked for by commit. */
   branch: string | null;
+  commit: string | null;
   status: AnalysisStatus;
   stage: AnalysisStage | null;
   /** The stage message while running, the reason once failed. */
@@ -86,7 +92,7 @@ export function RepositoryBrowser({ rows, focus }: { rows: RepositoryRow[]; focu
   );
 }
 
-const EMPTY: SubmitState = { error: null, repo: "", branch: "" };
+const EMPTY: SubmitState = { error: null, repo: "", ref: "" };
 
 function CloneForm({ autoFocus }: { autoFocus: boolean }) {
   const [state, action, pending] = useActionState(submitRepository, EMPTY);
@@ -106,13 +112,13 @@ function CloneForm({ autoFocus }: { autoFocus: boolean }) {
           />
         </label>
         <div className="flex flex-1 items-center gap-2 py-2 pr-2 pl-3 sm:flex-none sm:border-l sm:border-border">
-          <label className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[11px] sm:w-32 sm:flex-none">
+          <label className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-[11px] sm:w-40 sm:flex-none">
             <Icon name="branch" className="size-3.5 shrink-0 text-muted" />
             <input
-              name="branch"
-              defaultValue={state.branch}
-              placeholder="branch"
-              aria-label="Branch"
+              name="ref"
+              defaultValue={state.ref}
+              placeholder="branch or commit"
+              aria-label="Branch or commit"
               className="min-w-0 flex-1 bg-transparent outline-none placeholder:font-sans placeholder:text-muted"
             />
           </label>
@@ -139,22 +145,25 @@ function Row({ row }: { row: RepositoryRow }) {
   const stale = row.stale && sameEvent(event, initial);
   const done = event.status === "complete";
   const failed = event.status === "failed";
-  // Only a finished map has a commit to compare; one still running will take the tip anyway.
-  const head = useHeadCheck(row.id, done);
+  // Only a finished map of a branch has a commit to compare; one asked for by
+  // commit follows no branch, and one still running is at a commit just resolved.
+  const head = useHeadCheck(row.id, done && row.branch !== null);
   const moved = head?.state === "moved";
 
   // A ready row says nothing beyond its size; words only appear when it is not ready.
   let note: string | null = null;
-  if (failed) note = event.message ?? "Failed";
+  // A failed run with an earlier map behind it opens on that map, so the note says which run failed.
+  if (failed) note = (row.open !== row.id ? "Latest run failed: " : "") + (event.message ?? "Failed");
   else if (stale) note = "Stopped responding";
   else if (!done) note = statusOf(event.stage, event.status) + (unavailable ? " · live updates off" : "");
   else if (moved) note = "New commits since this map";
 
   return (
     <li className="flex items-center border-t border-border first:border-t-0 hover:bg-background">
-      <Link href={`/analyses/${row.id}`} className="group flex h-10 min-w-0 flex-1 items-center gap-3 px-4">
+      <Link href={`/analyses/${row.open}`} className="group flex h-10 min-w-0 flex-1 items-center gap-3 px-4">
         <span className="min-w-0 truncate font-mono text-xs">{row.repo}</span>
         {row.branch && <span className="shrink-0 font-mono text-[10px] text-muted">{row.branch}</span>}
+        {row.commit && <span className="shrink-0 font-mono text-[10px] text-muted">{row.commit.slice(0, 7)}</span>}
         <span className={`min-w-0 flex-1 truncate text-right text-[11px] ${failed ? "text-danger" : "text-muted"}`}>
           {note ?? (row.files !== null ? <span className="font-mono text-[10px] tabular-nums">{formatCount(row.files)} files</span> : null)}
         </span>

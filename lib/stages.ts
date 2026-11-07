@@ -25,6 +25,13 @@ export function isStale(status: AnalysisStatus, stageChangedAt: string, now: num
   return (status === "queued" || status === "running") && now - Date.parse(stageChangedAt) > STALE_AFTER_MS;
 }
 
+/**
+ * How many analyses a repository keeps. When a run finishes beyond this, the
+ * oldest go. Only a finished run removes anything, so a failed one touches
+ * nothing that already existed.
+ */
+export const KEPT_ANALYSES = 10;
+
 /** What the database publishes on analysis:<id> whenever the stage moves. */
 export interface StageEvent {
   status: AnalysisStatus;

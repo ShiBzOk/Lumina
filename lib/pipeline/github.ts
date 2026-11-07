@@ -44,32 +44,63 @@ export function parseRepoInput(input: string): RepoRef | null {
 }
 
 export interface ResolvedCommit {
-  branch: string;
+  /** The branch asked for, or the default one. Null when a commit hash was asked for: it may be on any number of branches. */
+  branch: string | null;
   sha: string;
   description: string | null;
 }
 
-/** Which commit the archive will come from: the tip of `branch`, or of the default branch. */
-export async function resolveCommit(repo: RepoRef, branch: string | null): Promise<ResolvedCommit> {
+// Short hashes below seven characters are too likely to match several commits.
+const COMMIT_HASH = /^[0-9a-f]{7,40}$/i;
+
+/**
+ * Which commit to analyse: the tip of a branch, a commit given by its hash, or
+ * the tip of the default branch when `ref` is null. A name is tried as a
+ * branch first, the way git reads a ref, so a branch that happens to look like
+ * a hash is still the branch.
+ */
+export async function resolveCommit(repo: RepoRef, ref: string | null): Promise<ResolvedCommit> {
   const slug = `${repo.owner}/${repo.name}`;
   const info = await github(`/repos/${slug}`, `github.com/${slug} doesn't exist or isn't public`);
   const body: unknown = await info.json();
   const defaultBranch = field(body, "default_branch");
   if (typeof defaultBranch !== "string") throw new Error(`GitHub's answer for ${slug} has no default branch`);
-  const description = field(body, "description");
+  const rawDescription = field(body, "description");
+  const description = typeof rawDescription === "string" && rawDescription.trim() ? rawDescription.trim() : null;
 
-  const ref = branch ?? defaultBranch;
-  const sha = await headCommit(repo, ref);
-  return { branch: ref, sha, description: typeof description === "string" && description.trim() ? description.trim() : null };
+  const wanted = ref ?? defaultBranch;
+  const tip = await branchHead(repo, wanted);
+  if (tip) return { branch: wanted, sha: tip, description };
+  if (ref === null || !COMMIT_HASH.test(ref)) throw new Error(`${slug} has no branch named "${wanted}"`);
+  return { branch: null, sha: await commitSha(repo, ref), description };
+}
+
+/** The full hash of a commit given by a full or short hash. GitHub answers 422 for one it doesn't have. */
+async function commitSha(repo: RepoRef, hash: string): Promise<string> {
+  const slug = `${repo.owner}/${repo.name}`;
+  // This media type answers with the bare hash, not the whole commit and its diff.
+  const res = await github(`/repos/${slug}/commits/${hash}`, `${slug} has no branch or commit named "${hash}"`, {
+    Accept: "application/vnd.github.sha",
+  });
+  const sha = (await res.text()).trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`GitHub's answer for commit ${hash} of ${slug} isn't a commit hash`);
+  return sha;
 }
 
 /**
  * The commit `branch` points at now, asked the way `git ls-remote` asks:
  * git's own protocol (v2 ls-refs), not the REST API. It is checked every time
- * a map or the repositories list opens and at the start of every run, and
- * the 60-an-hour API allowance is kept for what only the API can answer.
+ * a map or the repositories list opens, and the 60-an-hour API allowance is
+ * kept for what only the API can answer.
  */
 export async function headCommit(repo: RepoRef, branch: string): Promise<string> {
+  const sha = await branchHead(repo, branch);
+  if (!sha) throw new Error(`${repo.owner}/${repo.name} has no branch named "${branch}"`);
+  return sha;
+}
+
+/** The tip of `branch`, or null when there is no such branch. */
+async function branchHead(repo: RepoRef, branch: string): Promise<string | null> {
   const slug = `${repo.owner}/${repo.name}`;
   const ref = `refs/heads/${branch}`;
   const pkt = (line: string) => (Buffer.byteLength(line) + 4).toString(16).padStart(4, "0") + line;
@@ -93,7 +124,7 @@ export async function headCommit(repo: RepoRef, branch: string): Promise<string>
     const m = /^[0-9a-f]{4}([0-9a-f]{40}) (.+)$/.exec(line);
     if (m && m[2] === ref) return m[1];
   }
-  throw new Error(`${slug} has no branch named "${branch}"`);
+  return null;
 }
 
 /**
@@ -115,6 +146,7 @@ export async function downloadArchive(repo: RepoRef, sha: string, file: string, 
   const res = await fetch(`https://codeload.github.com/${repo.owner}/${repo.name}/tar.gz/${sha}`, {
     headers: { "User-Agent": "lumina" },
   });
+  if (res.status === 404) throw new Error(`GitHub has no archive of ${repo.owner}/${repo.name} at ${sha.slice(0, 7)}`);
   if (!res.ok || !res.body) throw new Error(`GitHub refused the archive download: HTTP ${res.status}`);
   const declared = Number(res.headers.get("content-length"));
   if (declared > MAX_ARCHIVE_BYTES) throw new Error(`The archive is ${mb(declared)}; the limit is ${mb(MAX_ARCHIVE_BYTES)}`);

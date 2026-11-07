@@ -6,6 +6,7 @@ import type { AnalysisStatus } from "@/lib/stages";
 import { Icon } from "./icons";
 
 export interface RepositoryOption {
+  /** The analysis the repository opens on: the latest map, or a run still in progress. */
   id: string;
   repo: string;
   branch: string | null;
@@ -13,27 +14,9 @@ export interface RepositoryOption {
 }
 
 /** The current repository, which opens onto the organization's others and a way to add one. */
-export function RepoSwitcher({
-  current,
-  repo,
-  branch,
-  repositories,
-}: {
-  current: string;
-  repo: string;
-  branch: string;
-  repositories: readonly RepositoryOption[];
-}) {
+export function RepoSwitcher({ repo, repositories }: { repo: string; repositories: readonly RepositoryOption[] }) {
   return (
-    <Menu
-      icon="repo"
-      label={
-        <>
-          <span className="font-mono">{repo}</span>
-          <span className="rounded bg-background px-1 font-mono text-[10px] text-muted ring-1 ring-border">{branch}</span>
-        </>
-      }
-    >
+    <Menu icon="repo" label={<span className="font-mono">{repo}</span>}>
       {(close) => (
         <>
           <MenuHeading>Repositories</MenuHeading>
@@ -44,7 +27,7 @@ export function RepoSwitcher({
                 {r.branch && <span className="shrink-0 text-[10px] text-muted">{r.branch}</span>}
                 {/* Only a finished analysis has a map; the others open on their progress. */}
                 {r.status !== "complete" && <span className="shrink-0 text-[10px] text-muted">{r.status}</span>}
-                {r.id === current ? <Icon name="check" className="size-3.5 shrink-0 text-accent" /> : <span className="size-3.5 shrink-0" />}
+                {r.repo === repo ? <Icon name="check" className="size-3.5 shrink-0 text-accent" /> : <span className="size-3.5 shrink-0" />}
               </Link>
             ))}
           </div>

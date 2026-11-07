@@ -21,11 +21,16 @@ import { explainKey, type ExplainState } from "./explanation";
 import { Icon } from "./icons";
 import { FileSearch } from "./file-search";
 import { RepoSwitcher, type RepositoryOption } from "./repo-switcher";
+import { AnalysisSwitcher, type AnalysisOption } from "./analysis-switcher";
 
 interface MapWorkspaceProps {
-  meta: { analysisId: string; repo: string; branch: string; commit: string };
-  /** The organization's analyses, for switching between them. */
+  meta: { analysisId: string; repo: string; branch: string | null; commit: string };
+  /** The organization's repositories, for switching between them. */
   repositories: RepositoryOption[];
+  /** This repository's analyses, newest first, this one among them. */
+  analyses: AnalysisOption[];
+  /** The latest finished analysis of this repository. */
+  latest: string | null;
   adapter: string;
   files: RepoFile[];
   edges: Edge[];
@@ -38,7 +43,7 @@ interface MapWorkspaceProps {
 
 // The shell: header across the top, categories on the left, the canvas in the
 // middle, details on the right. Later phases add to these panels, not move them.
-export function MapWorkspace({ meta, repositories, adapter, files, edges, imports, routes, routesWithheld, coverage, labels }: MapWorkspaceProps) {
+export function MapWorkspace({ meta, repositories, analyses, latest, adapter, files, edges, imports, routes, routesWithheld, coverage, labels }: MapWorkspaceProps) {
   const modelRoles = useMemo(() => new Map(labels.map((l) => [l.path, l.role])), [labels]);
   const map = useMemo(() => buildMap(files, edges, modelRoles), [files, edges, modelRoles]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -69,6 +74,7 @@ export function MapWorkspace({ meta, repositories, adapter, files, edges, import
   );
 
   const lit = useMemo(() => highlight(map, selection), [map, selection]);
+  const analysed = useMemo(() => new Map(analyses.flatMap((a) => (a.commit ? [[a.commit, a.id] as const] : []))), [analyses]);
   const summary = useMemo(() => summarize(files, imports), [files, imports]);
   const byPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
   const importsOf = useMemo(
@@ -126,25 +132,27 @@ export function MapWorkspace({ meta, repositories, adapter, files, edges, import
     .filter(Boolean)
     .join(" · ");
 
+  // Hooks are all above: this is the first place the render may stop.
+  const current = analyses.find((a) => a.id === meta.analysisId);
+  if (!current) throw new Error(`Analysis ${meta.analysisId} is not among its repository's analyses`);
+
   return (
     <div className="flex h-screen flex-col bg-background">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
         <Logo />
         <span className="h-5 w-px bg-border" aria-hidden />
-        <RepoSwitcher current={meta.analysisId} repo={meta.repo} branch={meta.branch} repositories={repositories} />
+        <RepoSwitcher repo={meta.repo} repositories={repositories} />
+        <AnalysisSwitcher current={current} latest={latest} analyses={analyses} />
 
         <div className="flex flex-1 items-center justify-center gap-2 font-mono text-[11px] text-muted">
-          <Icon name="branch" className="size-3.5" />
-          <span className="text-foreground">{meta.branch}</span>
-          <span title={meta.commit}>{meta.commit.slice(0, 7)}</span>·<span>{files.length} files</span>·
-          <span>{edges.length} dependency links</span>
+          <span>{files.length} files</span>·<span>{edges.length} dependency links</span>
         </div>
 
         <FileSearch nodes={map.nodes} onPick={selectAndReveal} />
         <AccountButton />
       </header>
 
-      <NewCommitsBanner analysisId={meta.analysisId} branch={meta.branch} commit={meta.commit} />
+      <NewCommitsBanner analysisId={meta.analysisId} branch={meta.branch} commit={meta.commit} analysed={analysed} />
       <CoverageBanner coverage={coverage} />
 
       <div className="flex min-h-0 flex-1">
