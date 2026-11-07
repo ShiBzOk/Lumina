@@ -5,7 +5,7 @@ import { LoadingAnalysis } from "@/components/analysis/loading";
 import { MissingAnalysis } from "@/components/analysis/missing";
 import { PageTransition } from "@/components/page-transition";
 import { analysisPath, parseVersion } from "@/lib/analysis-path";
-import { findAnalysis, listProjectAnalyses } from "@/lib/analyses";
+import { findAnalysis, listProjectAnalyses, repositoryMap } from "@/lib/analyses";
 import { KEPT_ANALYSES, versionName } from "@/lib/stages";
 import { AnalysisScreen } from "../../../analyses/analysis-screen";
 
@@ -26,7 +26,7 @@ async function Analysis({ params, searchParams }: PageProps<"/[owner]/[repo]/[ve
   }
 
   // The repository is this organization's, so saying what became of the version tells no one anything new.
-  const latest = (await listProjectAnalyses(found.projectId)).find((a) => a.status === "complete");
+  const latest = repositoryMap(await listProjectAnalyses(found.projectId), found.defaultBranch);
   const action = latest
     ? { href: analysisPath({ id: latest.id, owner: found.owner, name: found.name, version: latest.version }), label: `Open ${versionName(latest.version)}` }
     : undefined;

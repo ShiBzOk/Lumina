@@ -127,8 +127,13 @@ async function analyse(target: { orgId: string; by: Author; projectId: string; r
   }
 
   const db = createWriterSupabase();
-  const described = await db.from("projects").update({ description: commit.description }).eq("id", projectId);
-  if (described.error) throw new Error(`Could not record the description: ${described.error.message}`);
+  // Both as GitHub says now. The default branch decides which analysis speaks
+  // for the repository, so a changed default is followed from this run on.
+  const described = await db
+    .from("projects")
+    .update({ description: commit.description, default_branch: commit.defaultBranch })
+    .eq("id", projectId);
+  if (described.error) throw new Error(`Could not record the description and default branch: ${described.error.message}`);
 
   const inserted = await db
     .from("analyses")

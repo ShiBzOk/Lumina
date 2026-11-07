@@ -533,6 +533,7 @@ export type Database = {
       projects: {
         Row: {
           created_at: string
+          default_branch: string | null
           description: string | null
           id: string
           last_version: number
@@ -542,6 +543,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          default_branch?: string | null
           description?: string | null
           id?: string
           last_version?: number
@@ -551,6 +553,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          default_branch?: string | null
           description?: string | null
           id?: string
           last_version?: number
@@ -660,7 +663,38 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      default_branch_analyses: {
+        Args: { "": Database["public"]["Tables"]["projects"]["Row"] }
+        Returns: {
+          adapter: string | null
+          attempt: number
+          branch: string | null
+          commit_sha: string | null
+          coverage: Json | null
+          created_at: string
+          error: string | null
+          file_count: number | null
+          finished_at: string | null
+          id: string
+          org_id: string
+          package_count: number | null
+          project_id: string
+          routes_withheld: Json
+          stage: Database["public"]["Enums"]["analysis_stage"] | null
+          stage_changed_at: string
+          stage_message: string | null
+          started_by: string | null
+          started_by_name: string | null
+          status: Database["public"]["Enums"]["analysis_status"]
+          version: number
+        }[]
+        SetofOptions: {
+          from: "projects"
+          to: "analyses"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
     }
     Enums: {
       analysis_stage: "fetching" | "selecting" | "parsing" | "storing" | "labelling"

@@ -2,7 +2,7 @@ import { AnalysisProgress } from "@/components/analysis/progress";
 import { MapWorkspace } from "@/components/map/map-workspace";
 import { WorkspaceHeader } from "@/components/workspace-header";
 import { analysisPath } from "@/lib/analysis-path";
-import { listProjectAnalyses, listRepositories, loadGraph, type Analysis } from "@/lib/analyses";
+import { listProjectAnalyses, listRepositories, loadGraph, repositoryMap, type Analysis } from "@/lib/analyses";
 import { loadNotes } from "@/lib/notes";
 import { auth } from "@clerk/nextjs/server";
 import type { Address } from "@/lib/map/view";
@@ -56,7 +56,8 @@ export async function AnalysisScreen({ analysis, address }: { analysis: Analysis
         }}
         repositories={repositories.map((r) => ({ id: r.open, path: r.openPath, repo: r.repo, branch: r.branch, status: r.status }))}
         analyses={analyses}
-        latest={history.find((a) => a.status === "complete")?.id ?? null}
+        latest={repositoryMap(history, analysis.project.default_branch)?.id ?? null}
+        defaultBranch={analysis.project.default_branch}
         adapter={analysis.adapter}
         files={files}
         edges={edges}

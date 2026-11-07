@@ -48,6 +48,8 @@ export interface ResolvedCommit {
   branch: string | null;
   sha: string;
   description: string | null;
+  /** The repository's default branch as GitHub names it now, whatever was asked for. */
+  defaultBranch: string;
 }
 
 // Short hashes below seven characters are too likely to match several commits.
@@ -70,9 +72,9 @@ export async function resolveCommit(repo: RepoRef, ref: string | null): Promise<
 
   const wanted = ref ?? defaultBranch;
   const tip = await branchHead(repo, wanted);
-  if (tip) return { branch: wanted, sha: tip, description };
+  if (tip) return { branch: wanted, sha: tip, description, defaultBranch };
   if (ref === null || !COMMIT_HASH.test(ref)) throw new Error(`${slug} has no branch named "${wanted}"`);
-  return { branch: null, sha: await commitSha(repo, ref), description };
+  return { branch: null, sha: await commitSha(repo, ref), description, defaultBranch };
 }
 
 /** The full hash of a commit given by a full or short hash. GitHub answers 422 for one it doesn't have. */

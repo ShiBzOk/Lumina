@@ -20,6 +20,11 @@ export interface AnalysisOption {
   ran: string;
 }
 
+/** The branch an analysis was asked for by, or "commit" for one asked for by hash, which belongs to no branch. */
+export function branchOf(a: Pick<AnalysisOption, "branch">): string {
+  return a.branch ?? "commit";
+}
+
 /**
  * Which of the repository's analyses the map is drawn from, who mapped it,
  * and what it is compared against: one question, so one control. An earlier
@@ -29,14 +34,16 @@ export interface AnalysisOption {
 export function AnalysisSwitcher({
   current,
   latest,
+  defaultBranch,
   analyses,
   attribution,
   base,
   onCompare,
 }: {
   current: AnalysisOption;
-  /** The latest finished analysis: the one the repository opens on. */
+  /** The map the repository opens on: its default branch's newest, or with none, the newest of any branch. */
   latest: string | null;
+  defaultBranch: string | null;
   /** Newest first. */
   analyses: readonly AnalysisOption[];
   attribution: Attribution;
@@ -49,7 +56,15 @@ export function AnalysisSwitcher({
   const { verb, by, at } = attribution;
   const Verb = verb[0].toUpperCase() + verb.slice(1);
   const where = [current.commit?.slice(0, 7), current.branch].filter(Boolean).join(" on ");
-  const earlier = current.id !== latest;
+  // Earlier only against a newer map of the same branch: maps of different
+  // branches are neither newer nor older than each other. One asked for by
+  // commit follows no branch, so it is marked as that instead.
+  const position = analyses.findIndex((a) => a.id === current.id);
+  const earlier = current.branch !== null && analyses.some((a, i) => i < position && a.status === "complete" && a.branch === current.branch);
+  // Which map the repository opens on, said in its own words: the default
+  // branch's, or, when the default branch has none, simply the latest.
+  const opensOn = analyses.find((a) => a.id === latest);
+  const opensWord = opensOn && defaultBranch !== null && opensOn.branch === defaultBranch ? "default" : "latest";
   // Said only while it is true: the next run to finish removes the oldest.
   const oldest = analyses.length >= KEPT_ANALYSES ? analyses.at(-1) : undefined;
 
@@ -69,6 +84,11 @@ export function AnalysisSwitcher({
           {earlier && (
             <span className="rounded bg-background px-1 font-sans text-[10px] ring-1 ring-border">
               earlier<span className="hidden xl:inline"> analysis</span>
+            </span>
+          )}
+          {current.branch === null && (
+            <span className="rounded bg-background px-1 font-sans text-[10px] ring-1 ring-border">
+              commit<span className="hidden xl:inline"> only</span>
             </span>
           )}
         </span>
@@ -98,12 +118,16 @@ export function AnalysisSwitcher({
                 <span className="w-16 shrink-0 font-medium" title={a.commit ?? undefined}>
                   {versionName(a.version)}
                 </span>
-                <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted">{a.branch}</span>
+                <Branch of={a} />
                 {/* Only a finished analysis has a map; the others open on their progress or failure. */}
                 {a.status !== "complete" ? (
                   <span className={`shrink-0 text-[10px] ${a.status === "failed" ? "text-danger" : "text-muted"}`}>{a.status}</span>
                 ) : (
-                  a.id === latest && <span className="shrink-0 text-[10px] text-muted">latest</span>
+                  a.id === latest && (
+                    <span className="shrink-0 text-[10px] text-muted" data-tip="Opening the repository lands on this map">
+                      {opensWord}
+                    </span>
+                  )
                 )}
                 <span className="shrink-0 text-[10px] text-muted tabular-nums">{a.ran}</span>
                 {a.id === current.id ? <Icon name="check" className="size-3.5 shrink-0 text-accent" /> : <span className="size-3.5 shrink-0" />}
@@ -126,7 +150,7 @@ export function AnalysisSwitcher({
                   >
                     <Icon name="swap" className="size-3 shrink-0 text-muted" />
                     <span className="w-16 shrink-0">{versionName(a.version)}</span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted">{a.branch}</span>
+                    <Branch of={a} />
                     <span className="shrink-0 text-[10px] text-muted tabular-nums">{a.ran}</span>
                     {a.id === base ? <Icon name="check" className="size-3.5 shrink-0 text-accent" /> : <span className="size-3.5 shrink-0" />}
                   </button>
@@ -156,5 +180,12 @@ export function AnalysisSwitcher({
         </>
       )}
     </Menu>
+  );
+}
+
+// A branch name is set in monospace as a name; "commit" is a word, so it isn't.
+function Branch({ of }: { of: Pick<AnalysisOption, "branch"> }) {
+  return (
+    <span className={`min-w-0 flex-1 truncate text-[10px] text-muted ${of.branch === null ? "italic" : "font-mono"}`}>{branchOf(of)}</span>
   );
 }

@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { sameSelection, type Selection } from "@/lib/map/highlight";
 import { isUnchanged, type Absent, type CompareSide, type Comparison, type EdgePair } from "@/lib/map/compare";
-import type { AnalysisOption } from "./analysis-switcher";
+import { branchOf, type AnalysisOption } from "./analysis-switcher";
 import { versionName } from "@/lib/stages";
 import type { Note } from "@/lib/map/notes";
 import { Icon } from "./icons";
@@ -121,7 +121,7 @@ function AnalysisSelect({
         {analyses.map((a) => (
           <option key={a.id} value={a.id}>
             {versionName(a.version)}
-            {a.branch ? ` · ${a.branch}` : ""} · {a.ran}
+            {` · ${branchOf(a)}`} · {a.ran}
           </option>
         ))}
       </select>

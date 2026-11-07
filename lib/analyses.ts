@@ -31,16 +31,23 @@ async function reader() {
   return createServerSupabase();
 }
 
-const PROJECT = "project:projects!analyses_project_id_org_id_fkey(repo_owner, repo_name, description)";
+const PROJECT = "project:projects!analyses_project_id_org_id_fkey(repo_owner, repo_name, description, default_branch)";
 
 const ANALYSES = "analyses!analyses_project_id_org_id_fkey";
 
 const USER_ID = /^[A-Za-z0-9_]+$/;
 
+const DESCRIBED =
+  "id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, version, file_count, package_count, created_at, finished_at, started_by_name";
+
 /**
- * One entry per repository: its latest analysis, whatever state that is in,
- * which analysis opening the repository should land on, and whether someone
- * else finished a map of it since this person last opened one.
+ * One entry per repository: the analysis that speaks for it, whatever state
+ * that is in, which analysis opening the repository should land on, and
+ * whether someone else finished a map of it since this person last opened one.
+ *
+ * The default branch speaks for a repository: its newest analysis is what the
+ * row describes, and its newest map is what opens. A map of another branch, or
+ * of a bare commit, stands in only when the default branch has none at all.
  */
 export async function listRepositories() {
   const [supabase, { userId }] = await Promise.all([reader(), auth()]);
@@ -50,11 +57,18 @@ export async function listRepositories() {
     .from("projects")
     .select(
       `id, repo_owner, repo_name,
-       latest:${ANALYSES}(id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, version, file_count, package_count, created_at, finished_at, started_by_name),
-       finished:${ANALYSES}(id, version),
+       onDefault:default_branch_analyses(${DESCRIBED}),
+       defaultMap:default_branch_analyses(id, version),
+       latest:${ANALYSES}(${DESCRIBED}),
+       finished:${ANALYSES}(${DESCRIBED}),
        others:${ANALYSES}(finished_at),
        visit:last_visits!last_visits_project_id_org_id_fkey(visited_at)`,
     )
+    .order("created_at", { referencedTable: "onDefault", ascending: false })
+    .limit(1, { referencedTable: "onDefault" })
+    .eq("defaultMap.status", "complete")
+    .order("created_at", { referencedTable: "defaultMap", ascending: false })
+    .limit(1, { referencedTable: "defaultMap" })
     .order("created_at", { referencedTable: "latest", ascending: false })
     .limit(1, { referencedTable: "latest" })
     .eq("finished.status", "complete")
@@ -76,19 +90,22 @@ export async function listRepositories() {
   const now = Date.now();
   return data
     .flatMap((p) => {
-      const [latest] = p.latest;
-      if (!latest) return [];
-      const live = latest.status === "queued" || latest.status === "running";
-      const opened = live ? latest : (p.finished[0] ?? latest);
+      // With nothing on the default branch, the latest map of any branch, and
+      // only before there is one, the run making it. A run on another branch
+      // never shows over a map.
+      const described = p.onDefault[0] ?? p.finished[0] ?? p.latest[0];
+      if (!described) return [];
+      const live = described.status === "queued" || described.status === "running";
+      const opened = live ? described : (p.defaultMap[0] ?? p.finished[0] ?? described);
       const visited = p.visit[0]?.visited_at;
       const otherFinished = p.others[0]?.finished_at;
       return [
         {
-          ...latest,
+          ...described,
           projectId: p.id,
           repo: `${p.repo_owner}/${p.repo_name}`,
-          stale: isStale(latest.status, latest.stage_changed_at, now),
-          attribution: attribution(latest, now),
+          stale: isStale(described.status, described.stage_changed_at, now),
+          attribution: attribution(described, now),
           // Never opened means no marker: to a newcomer everything is unseen.
           isNew: visited !== undefined && otherFinished != null && Date.parse(otherFinished) > Date.parse(visited),
           // A run in progress opens on its progress; otherwise the latest map,
@@ -102,6 +119,19 @@ export async function listRepositories() {
 }
 
 export type RepositoryListItem = Awaited<ReturnType<typeof listRepositories>>[number];
+
+/**
+ * The map a repository opens on, out of its analyses newest first: the default
+ * branch's newest map, or with none, the newest map of any branch. The same
+ * rule the list applies in its query.
+ */
+export function repositoryMap<T extends { status: string; branch: string | null }>(
+  newestFirst: readonly T[],
+  defaultBranch: string | null,
+): T | undefined {
+  const maps = newestFirst.filter((a) => a.status === "complete");
+  return maps.find((a) => defaultBranch !== null && a.branch === defaultBranch) ?? maps[0];
+}
 
 /** One repository's analyses, newest first. A finishing run may briefly make it one more than are kept. */
 export async function listProjectAnalyses(projectId: string) {
@@ -148,7 +178,7 @@ export async function findAnalysis(owner: string, name: string, version: number)
   const supabase = await reader();
   const project = await supabase
     .from("projects")
-    .select("id, repo_owner, repo_name, last_version")
+    .select("id, repo_owner, repo_name, last_version, default_branch")
     .eq("repo_owner", owner)
     .eq("repo_name", name)
     .maybeSingle();
@@ -164,6 +194,7 @@ export async function findAnalysis(owner: string, name: string, version: number)
   return {
     kind: version <= project.data.last_version ? ("removed" as const) : ("never" as const),
     projectId: project.data.id,
+    defaultBranch: project.data.default_branch,
     owner: project.data.repo_owner,
     name: project.data.repo_name,
   };

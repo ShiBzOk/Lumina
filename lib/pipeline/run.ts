@@ -186,27 +186,52 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
  * Removes the repository's analyses beyond the most recent KEPT_ANALYSES.
  * Only called once this run is complete, so a run that fails never removes
  * anything; its own analysis is the newest and is never among those removed.
- * Everything an analysis owns, explanations included, goes with it by cascade.
- * By then the run has succeeded, so a failure here is logged, not turned into
- * a failed analysis; the next finished run removes what this one couldn't.
+ * The newest finished map of the default branch is what the repository opens
+ * on, so it is never removed either: when it falls past the kept, the oldest
+ * of the others goes in its place. Everything an analysis owns, explanations
+ * included, goes with it by cascade. By then the run has succeeded, so a
+ * failure here is logged, not turned into a failed analysis; the next finished
+ * run removes what this one couldn't.
  */
 async function prune(db: ReturnType<typeof createWriterSupabase>, request: RunRequest): Promise<void> {
+  const fail = (what: string, message: string) => console.error(`Analysis ${request.analysisId}: could not ${what}: ${message}`);
+  const project = await db.from("projects").select("default_branch").eq("id", request.projectId).single();
+  if (project.error) return fail("read the default branch", project.error.message);
+  const defaultBranch = project.data.default_branch;
+
+  // Null until a run records it, and then nothing is protected rather than a guess.
+  let protectedId: string | null = null;
+  if (defaultBranch !== null) {
+    const map = await db
+      .from("analyses")
+      .select("id")
+      .eq("project_id", request.projectId)
+      .eq("branch", defaultBranch)
+      .eq("status", "complete")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (map.error) return fail("find the default branch's map", map.error.message);
+    protectedId = map.data?.id ?? null;
+  }
+
   const { data, error } = await db
     .from("analyses")
     .select("id")
     .eq("project_id", request.projectId)
     .neq("id", request.analysisId)
     .order("created_at", { ascending: false })
-    // Its own analysis is one of the kept, so the others keep one fewer.
-    .range(KEPT_ANALYSES - 1, KEPT_ANALYSES + 99);
-  if (error) {
-    console.error(`Analysis ${request.analysisId}: could not list older analyses to remove: ${error.message}`);
-    return;
-  }
-  if (data.length === 0) return;
-  const removed = await db.from("analyses").delete().in("id", data.map((a) => a.id));
-  if (removed.error) console.error(`Analysis ${request.analysisId}: could not remove ${data.length} older analyses: ${removed.error.message}`);
-  else console.log(`Analysis ${request.analysisId}: removed ${data.length} analyses past the ${KEPT_ANALYSES} kept`);
+    .limit(KEPT_ANALYSES + 100);
+  if (error) return fail("list older analyses to remove", error.message);
+
+  // Its own analysis is one of the kept, so the others keep one fewer; and the
+  // protected map, when it isn't this run's own, takes one more of the places.
+  const keep = KEPT_ANALYSES - 1 - (protectedId !== null && protectedId !== request.analysisId ? 1 : 0);
+  const doomed = data.filter((a) => a.id !== protectedId).slice(keep);
+  if (doomed.length === 0) return;
+  const removed = await db.from("analyses").delete().in("id", doomed.map((a) => a.id));
+  if (removed.error) fail(`remove ${doomed.length} older analyses`, removed.error.message);
+  else console.log(`Analysis ${request.analysisId}: removed ${doomed.length} analyses past the ${KEPT_ANALYSES} kept`);
 }
 
 function size(bytes: number): string {

@@ -40,8 +40,10 @@ interface MapWorkspaceProps {
   repositories: RepositoryOption[];
   /** This repository's analyses, newest first, this one among them. */
   analyses: AnalysisOption[];
-  /** The latest finished analysis of this repository. */
+  /** The map the repository opens on: its default branch's newest, or with none, the newest of any branch. */
   latest: string | null;
+  /** As GitHub said at the last fetch; null for a repository not fetched since this was recorded. */
+  defaultBranch: string | null;
   adapter: string;
   files: RepoFile[];
   edges: Edge[];
@@ -68,6 +70,7 @@ export function MapWorkspace({
   repositories,
   analyses,
   latest,
+  defaultBranch,
   adapter,
   files,
   edges,
@@ -321,6 +324,7 @@ export function MapWorkspace({
             <AnalysisSwitcher
               current={current}
               latest={latest}
+              defaultBranch={defaultBranch}
               analyses={analyses}
               attribution={meta.attribution}
               base={base}
