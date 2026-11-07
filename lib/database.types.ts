@@ -455,6 +455,63 @@ export type Database = {
           },
         ]
       }
+      notes: {
+        Row: {
+          author_id: string
+          author_name: string
+          body: string
+          content_hash: string | null
+          created_at: string
+          edited_at: string | null
+          id: string
+          org_id: string
+          path: string
+          project_id: string
+          written_version: number | null
+        }
+        Insert: {
+          author_id: string
+          author_name: string
+          body: string
+          content_hash?: string | null
+          created_at?: string
+          edited_at?: string | null
+          id?: string
+          org_id: string
+          path: string
+          project_id: string
+          written_version?: number | null
+        }
+        Update: {
+          author_id?: string
+          author_name?: string
+          body?: string
+          content_hash?: string | null
+          created_at?: string
+          edited_at?: string | null
+          id?: string
+          org_id?: string
+          path?: string
+          project_id?: string
+          written_version?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notes_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_project_id_org_id_fkey"
+            columns: ["project_id", "org_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id", "org_id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           created_at: string

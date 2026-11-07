@@ -30,6 +30,8 @@ interface NodeCardProps {
   /** Header only: no file rows. */
   compact: boolean;
   marks: ReadonlyMap<string, FileMark> | null;
+  /** Paths that carry a note. */
+  noted: ReadonlySet<string>;
   /** Index of the first file shown; the card shows MAX_VISIBLE_ROWS from here. */
   offset: number;
   onSelectFile: (path: string) => void;
@@ -46,11 +48,13 @@ export const NodeCard = memo(function NodeCard({
   filtering,
   compact,
   marks,
+  noted,
   offset,
   onSelectFile,
 }: NodeCardProps) {
   // With rows hidden, the header is the only place a marked file can show.
   const marked = compact && marks !== null && node.files.some((f) => marks.has(f.path));
+  const hasNotes = compact && node.files.some((f) => noted.has(f.path));
   const selectedFile = selection?.kind === "file" ? selection.path : null;
   const shown = node.files.slice(offset, offset + MAX_VISIBLE_ROWS);
   const overflow = node.files.length > MAX_VISIBLE_ROWS;
@@ -92,6 +96,11 @@ export const NodeCard = memo(function NodeCard({
           </p>
           <p className="truncate font-mono text-[10.5px] leading-4 text-muted">{node.id === "." ? "./" : `${node.id}/`}</p>
         </div>
+        {hasNotes && (
+          <span className="shrink-0 text-muted" data-tip="Holds files with notes">
+            <Icon name="note" className="size-3" />
+          </span>
+        )}
         <span className="shrink-0 rounded-full bg-background px-2 py-0.5 font-mono text-[10.5px] text-muted">
           {overflow && `${offset + 1}–${offset + shown.length} of `}
           {/* While filtering every card says how many matched, so the counts on screen add up to the rail's. */}
@@ -126,6 +135,7 @@ export const NodeCard = memo(function NodeCard({
             dimmed={f.path !== hoveredFile && !traced?.has(f.path) && ((highlight !== null && !highlight.files.has(f.path)) || (filtering && !matches(f, filter)))}
             handles={highlight?.handles.get(f.path)}
             mark={marks?.get(f.path)}
+            noted={noted.has(f.path)}
             onSelect={onSelectFile}
           />
         ))}
@@ -154,6 +164,7 @@ function Row({
   dimmed,
   handles,
   mark,
+  noted,
   onSelect,
 }: {
   file: FileRow;
@@ -163,6 +174,7 @@ function Row({
   dimmed: boolean;
   handles: { left?: Direction; right?: Direction } | undefined;
   mark: FileMark | undefined;
+  noted: boolean;
   onSelect: (path: string) => void;
 }) {
   return (
@@ -185,6 +197,12 @@ function Row({
       <RowHandle side="left" direction={handles?.left} traced={traced?.left} />
       <span className="size-1.5 shrink-0 rounded-full" style={{ background: TYPE_COLOR[file.type] }} aria-hidden />
       <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{file.label}</span>
+      {/* Neutral on purpose: colour on this map already means something else. */}
+      {noted && (
+        <span className="shrink-0 text-muted" data-tip="Has notes">
+          <Icon name="note" className="size-3" />
+        </span>
+      )}
       {mark && (
         <span className="shrink-0 font-mono text-[11px] font-medium text-accent" data-tip={MARK[mark].title}>
           {MARK[mark].glyph}

@@ -41,12 +41,13 @@ export function CopyLink({ path, view }: { path: string; view: View }) {
         type="button"
         onClick={copy}
         data-tip={shown && !("error" in shown) ? "Link copied" : "Copy a link to this exact view: selection, open walk, cards and Compare"}
-        aria-label="Copy link"
-        className={`flex items-center rounded-lg border border-border p-1.5 hover:bg-background ${
-          shown && !("error" in shown) ? "text-accent" : "text-muted hover:text-foreground"
+        aria-label="Share: copy a link to this view"
+        className={`flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[11px] hover:bg-background ${
+          shown && !("error" in shown) ? "text-accent" : "text-foreground"
         }`}
       >
         <Icon name={shown && !("error" in shown) ? "check" : "copy"} className="size-3.5" />
+        {shown && !("error" in shown) ? "Copied" : "Share"}
       </button>
       {note && (
         <div className="absolute top-full right-0 z-30 mt-1.5 flex w-72 items-start gap-2 rounded-lg bg-surface px-3 py-2 text-[11px] leading-snug shadow-[0_2px_10px_rgba(16,24,40,0.08)] ring-1 ring-border">

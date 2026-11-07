@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AccountButton } from "@/components/account-button";
 import { Logo } from "@/components/logo";
-import { explain, loadCompareSide, recordVisit } from "@/app/analyses/actions";
-import { AttributionLine } from "@/components/attribution-line";
+import { addNote, deleteNote, editNote, explain, loadCompareSide, recordVisit, type NotesResult } from "@/app/analyses/actions";
+import { notedPaths, type Note } from "@/lib/map/notes";
 import { compareAnalyses, type ComparedAnalysis } from "@/lib/map/compare";
 import { frameworkOf, MODEL_CATEGORIES, type ModelRole } from "@/lib/map/frameworks";
 import { highlight, isFiltering, matches, NO_FILTER, sameSelection, type Filter, type Selection } from "@/lib/map/highlight";
@@ -32,6 +32,7 @@ import { ComparePane, type CompareState } from "./compare-pane";
 import type { FileMark } from "./node-card";
 import { CopyLink } from "./copy-link";
 import { MissingFromLink } from "./missing-from-link";
+import type { NoteActions } from "./notes";
 
 interface MapWorkspaceProps {
   meta: { analysisId: string; projectId: string; repo: string; branch: string | null; commit: string; attribution: Attribution };
@@ -49,6 +50,10 @@ interface MapWorkspaceProps {
   routesWithheld: WithheldRoute[];
   coverage: Coverage;
   labels: { path: string; role: ModelRole }[];
+  /** The repository's notes as they were when the map opened, newest first. */
+  notes: Note[];
+  /** The person looking, so their own notes can be edited. The database decides whether they may. */
+  me: string;
   /** The page's search params: the view to open on. Read once; after that the view writes the address. */
   address: Address;
 }
@@ -71,6 +76,8 @@ export function MapWorkspace({
   routesWithheld,
   coverage,
   labels,
+  notes: initialNotes,
+  me,
   address,
 }: MapWorkspaceProps) {
   // Opening a map is a visit to its repository: one write, when it opens, and
@@ -130,6 +137,22 @@ export function MapWorkspace({
     [meta.analysisId],
   );
 
+  // Notes are read when the map opens and replaced by whatever a write of
+  // your own returns. Nothing refreshes them in between.
+  const [notes, setNotes] = useState(initialNotes);
+  const noted = useMemo(() => notedPaths(notes), [notes]);
+  const noteActions = useMemo<NoteActions>(() => {
+    const keep = (result: NotesResult) => {
+      if (result.ok) setNotes(result.notes);
+      return result;
+    };
+    return {
+      add: (path, body) => addNote(meta.analysisId, path, body).then(keep),
+      edit: (id, body) => editNote(meta.analysisId, id, body).then(keep),
+      remove: (id) => deleteNote(meta.analysisId, id).then(keep),
+    };
+  }, [meta.analysisId]);
+
   // Compare is a mode of the whole right-hand pane. The head is always the
   // analysis on screen; choosing another head goes to that analysis's map.
   // Base and head are never the same analysis: comparing one with itself says
@@ -139,19 +162,17 @@ export function MapWorkspace({
   const [base, setBase] = useState<string | null>(restored.view.compare === meta.analysisId ? null : restored.view.compare);
   const openCompare = (head: string, against: string) =>
     router.push(`${analyses.find((a) => a.id === head)?.path ?? `/analyses/${head}`}${writeView({ ...DEFAULT_VIEW, compare: against })}`);
-  const toggleCompare = () => {
-    if (base !== null) return setBase(null);
-    // From the one before this, to this. On the oldest there is none before,
-    // so it goes to the next newer map, from this one, keeping older → newer.
-    const at = finished.findIndex((a) => a.id === meta.analysisId);
-    const older = finished[at + 1];
-    if (older) {
-      setBase(older.id);
-      setPaneOpen(true);
-      return;
-    }
-    const newer = finished[at - 1];
-    if (newer) openCompare(newer.id, meta.analysisId);
+  // Started from the version menu. A comparison always reads older → newer:
+  // an older choice becomes the base here, a newer one opens its own map with
+  // this one as the base.
+  const compareWith = (id: string | null) => {
+    if (id === null) return setBase(null);
+    const other = finished.find((a) => a.id === id);
+    const self = finished.find((a) => a.id === meta.analysisId);
+    if (!other || !self || id === meta.analysisId) return;
+    if (other.version > self.version) return openCompare(id, meta.analysisId);
+    setBase(id);
+    setPaneOpen(true);
   };
   const chooseBase = (id: string) => {
     if (id !== meta.analysisId) setBase(id);
@@ -297,26 +318,19 @@ export function MapWorkspace({
           <RepoSwitcher repo={meta.repo} repositories={repositories} />
           <Icon name="chevronRight" className="size-3 shrink-0 text-muted" />
           <div className="shrink-0">
-            <AnalysisSwitcher current={current} latest={latest} analyses={analyses} />
+            <AnalysisSwitcher
+              current={current}
+              latest={latest}
+              analyses={analyses}
+              attribution={meta.attribution}
+              base={base}
+              onCompare={compareWith}
+            />
           </div>
-          <AttributionLine attribution={meta.attribution} className="ml-2 hidden min-w-0 truncate text-[11px] text-muted lg:inline" />
         </div>
 
         <div className="flex flex-1 shrink-0 items-center justify-end gap-2">
-          <FileSearch nodes={map.nodes} onPick={selectAndReveal} />
-          {canCompare && (
-            <button
-              type="button"
-              aria-pressed={base !== null}
-              onClick={toggleCompare}
-              data-tip={base !== null ? "Leave Compare" : "See what changed between two analyses of this repository"}
-              className={`rounded-lg border px-2.5 py-1.5 text-[11px] ${
-                base !== null ? "border-accent/50 bg-accent/8 text-accent" : "border-border hover:bg-background"
-              }`}
-            >
-              Compare
-            </button>
-          )}
+          <FileSearch nodes={map.nodes} noted={noted} onPick={selectAndReveal} />
           <CopyLink path={here} view={view} />
           <AccountButton />
         </div>
@@ -348,36 +362,24 @@ export function MapWorkspace({
           hovered={hovered}
           filter={filter}
           marks={marks}
+          noted={noted}
           onSelect={select}
           onHover={hover}
           initial={{ compact: restored.view.compact, offsets: restored.view.scroll }}
           onView={onCardsView}
           banner={
-            <div className="flex items-center gap-2 rounded-full bg-surface/95 px-3.5 py-1.5 text-[11px] whitespace-nowrap text-muted shadow-[0_1px_6px_rgba(16,24,40,0.06)] ring-1 ring-border">
-              {filtering ? (
-                <>
-                  <span>
-                    Filtering: <span className="font-mono font-medium text-foreground">{filterName}</span>
-                  </span>
-                  <span className="font-mono">· {matchingCount} files</span>
-                  <button
-                    type="button"
-                    onClick={() => setFilter(NO_FILTER)}
-                    className="underline underline-offset-2 hover:text-foreground"
-                  >
-                    Clear
-                  </button>
-                </>
-              ) : (
-                <>
-                  <Icon name="layers" className="size-3.5" />
-                  <span>
-                    {map.nodes.length} folders · {files.length} files · {edges.length} dependency links · click a card or file to trace
-                    its connections
-                  </span>
-                </>
-              )}
-            </div>
+            // Only while filtering, where it says what is filtered and how to undo it. The map needs no caption.
+            filtering ? (
+              <div className="flex items-center gap-2 rounded-full bg-surface/95 px-3.5 py-1.5 text-[11px] whitespace-nowrap text-muted shadow-[0_1px_6px_rgba(16,24,40,0.06)] ring-1 ring-border">
+                <span>
+                  Filtering: <span className="font-mono font-medium text-foreground">{filterName}</span>
+                </span>
+                <span className="font-mono">· {matchingCount} files</span>
+                <button type="button" onClick={() => setFilter(NO_FILTER)} className="underline underline-offset-2 hover:text-foreground">
+                  Clear
+                </button>
+              </div>
+            ) : null
           }
         >
           {/* Each fades in as its panel finishes leaving, where the panel went. */}
@@ -414,6 +416,7 @@ export function MapWorkspace({
               state={compareState}
               inHead={headPaths}
               hovered={hovered}
+              notes={notes}
               onBase={chooseBase}
               onHead={chooseHead}
               onReveal={reveal}
@@ -435,6 +438,9 @@ export function MapWorkspace({
             modelRoles={modelRoles}
             explanations={explanations}
             onExplain={runExplain}
+            notes={notes}
+            me={me}
+            noteActions={noteActions}
             importsOf={importsOf}
             graph={graph}
             insights={insights}

@@ -5,7 +5,7 @@
 import { DEFAULT_DEPTH, DEPTHS, type WalkDirection } from "./graph.ts";
 import type { Selection } from "./highlight.ts";
 
-export type PaneTab = "structure" | "explanation";
+export type PaneTab = "structure" | "explanation" | "notes";
 
 export interface View {
   selection: Selection;
@@ -85,7 +85,8 @@ export function readView(address: Address, bounds: ViewBounds): { view: View; mi
     else missing.push({ kind: "folder", id: folder });
   }
 
-  const tab: PaneTab = one(address, "tab") === "explanation" ? "explanation" : "structure";
+  const tabName = one(address, "tab");
+  const tab: PaneTab = tabName === "explanation" || tabName === "notes" ? tabName : "structure";
 
   // A walk belongs to a selected file; without one there is nothing it walks from.
   const walkName = one(address, "walk");

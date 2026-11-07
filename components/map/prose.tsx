@@ -68,9 +68,9 @@ interface ProseProps {
   onHover: (s: Selection) => void;
 }
 
-export function Prose({ body, ...links }: ProseProps) {
+export function Prose({ body, className = "text-[11.5px] leading-relaxed", ...links }: ProseProps & { className?: string }) {
   return (
-    <div className="flex flex-col gap-2 text-[11.5px] leading-relaxed">
+    <div className={`flex flex-col gap-2 ${className}`}>
       {parseProse(body).map((b, i) =>
         b.kind === "p" ? (
           <p key={i}>{renderInline(b.inline, links)}</p>

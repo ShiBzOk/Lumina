@@ -3,6 +3,8 @@ import { MapWorkspace } from "@/components/map/map-workspace";
 import { WorkspaceHeader } from "@/components/workspace-header";
 import { analysisPath } from "@/lib/analysis-path";
 import { listProjectAnalyses, listRepositories, loadGraph, type Analysis } from "@/lib/analyses";
+import { loadNotes } from "@/lib/notes";
+import { auth } from "@clerk/nextjs/server";
 import type { Address } from "@/lib/map/view";
 import type { AnalysisStatus } from "@/lib/stages";
 import { exactTime } from "@/lib/when";
@@ -20,11 +22,14 @@ export async function AnalysisScreen({ analysis, address }: { analysis: Analysis
     if (!analysis.commit_sha || !analysis.adapter) {
       throw new Error(`Analysis ${analysis.id} is complete but has no commit or adapter recorded`);
     }
-    const [{ files, edges, imports, routes, routesWithheld, coverage, labels }, history, repositories] = await Promise.all([
+    const [{ files, edges, imports, routes, routesWithheld, coverage, labels }, history, repositories, notes, { userId }] = await Promise.all([
       loadGraph(analysis),
       listProjectAnalyses(analysis.project_id),
       listRepositories(),
+      loadNotes(analysis.project_id),
+      auth(),
     ]);
+    if (!userId) throw new Error("No signed-in user on the session");
     const option = (a: { id: string; version: number; commit_sha: string | null; branch: string | null; status: AnalysisStatus; created_at: string }) => ({
       id: a.id,
       path: analysisPath({ id: a.id, owner, name, version: a.version }),
@@ -60,6 +65,8 @@ export async function AnalysisScreen({ analysis, address }: { analysis: Analysis
         routesWithheld={routesWithheld}
         coverage={coverage}
         labels={labels}
+        notes={notes}
+        me={userId}
         address={address}
       />
     );

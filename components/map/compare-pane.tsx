@@ -5,6 +5,7 @@ import { sameSelection, type Selection } from "@/lib/map/highlight";
 import { isUnchanged, type Absent, type CompareSide, type Comparison, type EdgePair } from "@/lib/map/compare";
 import type { AnalysisOption } from "./analysis-switcher";
 import { versionName } from "@/lib/stages";
+import type { Note } from "@/lib/map/notes";
 import { Icon } from "./icons";
 
 /** Rows a list shows before it is asked for the rest. Long lists are real; drawing thousands at once isn't useful. */
@@ -25,6 +26,8 @@ interface ComparePaneProps {
   /** Paths on the map, which is the head: only these can be moved to. */
   inHead: ReadonlySet<string>;
   hovered: Selection;
+  /** Every note of the repository, newest first. */
+  notes: readonly Note[];
   onBase: (id: string) => void;
   onHead: (id: string) => void;
   onReveal: (path: string) => void;
@@ -57,28 +60,25 @@ export function ComparePane(props: ComparePaneProps) {
 
       {/* Read as a sentence: changes from one analysis to another. "Base" and
           "head" stay the names in code; on screen they are just from and to. */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5 text-[11px]">
-        <div className="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1.5">
-          <span className="text-muted">From</span>
-          {/* The analysis on screen is never offered as its own base. */}
-          <AnalysisSelect analyses={analyses.filter((a) => a.id !== head)} value={base} onChange={onBase} label="Compare from" />
-          <span className="text-muted">To</span>
-          <AnalysisSelect analyses={analyses} value={head} onChange={onHead} label="Compare to" />
-        </div>
+      <div
+        className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2.5 text-[12px]"
+        data-tip={`The map shows ${labelOf(head)}; files added or changed since ${labelOf(base)} are marked on it.`}
+      >
+        {/* The analysis on screen is never offered as its own base. */}
+        <AnalysisSelect analyses={analyses.filter((a) => a.id !== head)} value={base} onChange={onBase} label="Compare from" />
+        <Icon name="arrowRight" className="size-3.5 shrink-0 text-muted" />
+        <AnalysisSelect analyses={analyses} value={head} onChange={onHead} label="Compare to" />
+        <span className="flex-1" />
         <button
           type="button"
           onClick={() => onHead(base)}
           data-tip="Swap from and to"
           aria-label="Swap from and to"
-          className="shrink-0 rounded-md p-1.5 text-muted ring-1 ring-border hover:bg-background hover:text-foreground"
+          className="shrink-0 rounded-md p-1 text-muted hover:bg-background hover:text-foreground"
         >
           <Icon name="swap" className="size-3.5" />
         </button>
       </div>
-      <p className="shrink-0 border-b border-border px-3 py-2 text-[10px] leading-snug text-muted">
-        What changed from {labelOf(base)} to {labelOf(head)}. The map shows {labelOf(head)}; files added or changed since{" "}
-        {labelOf(base)} are marked on it.
-      </p>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
         {state.status === "loading" ? (
@@ -106,20 +106,26 @@ function AnalysisSelect({
   onChange: (id: string) => void;
   label: string;
 }) {
+  // Reads as a word in the sentence: the version alone, with branch and date in the open list.
+  const chosen = analyses.find((a) => a.id === value);
   return (
-    <select
-      value={value}
-      aria-label={label}
-      onChange={(e) => onChange(e.target.value)}
-      className="min-w-0 rounded-md border border-border bg-surface px-1.5 py-1 font-mono text-[11px] hover:bg-background"
-    >
-      {analyses.map((a) => (
-        <option key={a.id} value={a.id}>
-          {versionName(a.version)}
-          {a.branch ? ` · ${a.branch}` : ""} · {a.ran}
-        </option>
-      ))}
-    </select>
+    <span className="relative inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 font-medium hover:bg-background">
+      {chosen ? versionName(chosen.version) : "—"}
+      <Icon name="chevronDown" className="ml-0.5 size-3 text-muted" />
+      <select
+        value={value}
+        aria-label={label}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 cursor-pointer opacity-0"
+      >
+        {analyses.map((a) => (
+          <option key={a.id} value={a.id}>
+            {versionName(a.version)}
+            {a.branch ? ` · ${a.branch}` : ""} · {a.ran}
+          </option>
+        ))}
+      </select>
+    </span>
   );
 }
 
@@ -127,7 +133,37 @@ function Plain({ children }: { children: ReactNode }) {
   return <p className="mt-4 text-[11px] leading-relaxed text-muted">{children}</p>;
 }
 
-function Result({ comparison: c, inHead, hovered, onReveal, onHover }: ComparePaneProps & { comparison: Comparison }) {
+/** A changed file that carries notes, with the newest of them. */
+interface NotedChange {
+  path: string;
+  change: "added" | "removed" | "content changed";
+  newest: Note;
+  count: number;
+}
+
+// Notes are kept by path, so a path on either side of the comparison finds
+// its notes the same way. Order follows the comparison's own lists.
+function notedChanges(c: Comparison, notes: readonly Note[]): NotedChange[] {
+  const byPath = Map.groupBy(notes, (n) => n.path);
+  const out: NotedChange[] = [];
+  const add = (paths: readonly string[], change: NotedChange["change"]) => {
+    for (const path of paths) {
+      const on = byPath.get(path);
+      if (on && on.length > 0) out.push({ path, change, newest: on[0], count: on.length });
+    }
+  };
+  add(c.contentChanged, "content changed");
+  add(c.filesAdded, "added");
+  add(c.filesRemoved, "removed");
+  return out;
+}
+
+function firstLine(text: string): string {
+  const line = text.split("\n", 1)[0];
+  return line.length > 120 ? `${line.slice(0, 120)}…` : line;
+}
+
+function Result({ comparison: c, inHead, hovered, notes, onReveal, onHover }: ComparePaneProps & { comparison: Comparison }) {
   const path = (p: string) => <PathText path={p} inHead={inHead} hovered={hovered} onReveal={onReveal} onHover={onHover} />;
   // A path that joined or left a blast radius only because one side didn't parse it says so.
   const absentFrom = new Map(c.absent.filter((a) => a.kind !== "asset").map((a) => [a.path, a.missingFrom]));
@@ -150,6 +186,24 @@ function Result({ comparison: c, inHead, hovered, onReveal, onHover }: ComparePa
         <Plain>No structural difference. Both analyses have the same files, the same edges and the same content.</Plain>
       ) : (
         <>
+          <Part
+            title="Notes on changed files"
+            note="Added, removed or changed in content, and carrying notes. The newest note on each."
+            items={notedChanges(c, notes)}
+            render={(n) => (
+              <>
+                {path(n.path)}
+                <Reason>
+                  {n.change}
+                  {n.count > 1 && ` · ${n.count} notes`}
+                </Reason>
+                <p className="mt-1 border-l border-border pl-2 font-mono text-[10.5px] leading-snug text-foreground/85">
+                  {firstLine(n.newest.body)}
+                  <span className="text-muted"> — {n.newest.authorName}</span>
+                </p>
+              </>
+            )}
+          />
           <Part title="Files added" note="In head, not in base." items={c.filesAdded} render={path} />
           <Part title="Files removed" note="In base, not in head." items={c.filesRemoved} render={path} />
           <Part title="Not parsed on one side" note="Missing from one side for a reason other than being added or removed." items={c.absent} render={(a) => <AbsentItem absent={a}>{path(a.path)}</AbsentItem>} />
@@ -235,12 +289,14 @@ function Part<T>({ title, note, items, render }: { title: string; note: string; 
   if (items.length === 0) return null;
   const shown = all ? items : items.slice(0, LIST_LIMIT);
   return (
+    // A heading and its rows, no box: what the section means is on its title, for whoever asks.
     <section className="mt-4">
-      <p className="text-[11px] font-medium">{title}</p>
-      <p className="mb-1.5 text-[10px] text-muted">{note}</p>
-      <div className="rounded-lg border border-border px-2 py-1">
+      <p className="mb-1 w-fit cursor-help text-[11px] font-medium" data-tip={note}>
+        {title}
+      </p>
+      <div>
       {shown.map((item, i) => (
-        <div key={i} className="border-b border-border/60 py-1 font-mono text-[11px] leading-snug break-all last:border-b-0">
+        <div key={i} className="border-b border-border/50 py-1 font-mono text-[11px] leading-snug break-all last:border-b-0">
           {render(item)}
         </div>
       ))}

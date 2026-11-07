@@ -42,6 +42,17 @@ const SHADE = {
 } as const;
 type Share = { key: keyof typeof SHADE; label: string; count: number };
 
+/** What is incomplete when every import into the repository was drawn. */
+function otherGaps(coverage: Coverage): string {
+  const parts: string[] = [];
+  if (coverage.filesSkipped > 0) parts.push(`${formatCount(coverage.filesSkipped)} ${coverage.filesSkipped === 1 ? "file wasn't" : "files weren't"} read`);
+  if (coverage.syntaxErrors.length > 0) {
+    const n = coverage.syntaxErrors.length;
+    parts.push(`${formatCount(n)} ${n === 1 ? "file was" : "files were"} read despite syntax errors`);
+  }
+  return `Every import was drawn, but ${parts.join(" and ")}`;
+}
+
 // Says the map is partial whenever it is. It starts as one line that still
 // names the figure and can't be dismissed, so a map that is quietly
 // incomplete can never look complete.
@@ -72,12 +83,20 @@ export function CoverageBanner({ coverage }: { coverage: Coverage }) {
         className="flex w-full items-center gap-3 px-4 py-1.5 text-left hover:bg-background"
       >
         <Icon name="info" className="size-3.5 shrink-0 text-muted" />
-        <span className="min-w-0 truncate">
-          This map draws <span className="font-mono tabular-nums">{formatCount(figure.resolved)}</span> of the{" "}
-          <span className="font-mono tabular-nums">{formatCount(figure.intoRepo)}</span> imports that point inside the repository
-        </span>
-        <Bar shares={shares} total={figure.intoRepo} className="h-1.5 w-28 shrink-0" />
-        <span className="shrink-0 font-mono text-muted tabular-nums">{figure.percent.toFixed(1)}%</span>
+        {/* Names what is actually incomplete. The import figure only when imports are what's short:
+            "16 of 16, 100%" said nothing when the gap was a skipped file. */}
+        {figure.resolved < figure.intoRepo ? (
+          <>
+            <span className="min-w-0 truncate">
+              This map draws <span className="font-mono tabular-nums">{formatCount(figure.resolved)}</span> of the{" "}
+              <span className="font-mono tabular-nums">{formatCount(figure.intoRepo)}</span> imports that point inside the repository
+            </span>
+            <Bar shares={shares} total={figure.intoRepo} className="h-1.5 w-28 shrink-0" />
+            <span className="shrink-0 font-mono text-muted tabular-nums">{figure.percent.toFixed(1)}%</span>
+          </>
+        ) : (
+          <span className="min-w-0 truncate">{otherGaps(coverage)}</span>
+        )}
         <span className="flex-1" />
         <span className="shrink-0 text-muted">{open ? "Hide" : "What's missing"}</span>
         <Icon name="chevronRight" className={`drop-chevron size-3.5 shrink-0 text-muted ${open ? "rotate-90" : ""}`} />

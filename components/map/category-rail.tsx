@@ -23,7 +23,7 @@ interface CategoryRailProps {
 
 export function CategoryRail({ total, framework, roleCounts, modelRoleCounts, types, filter, onFilter, onCollapse }: CategoryRailProps) {
   const modelLabel = MODEL_CATEGORIES.find((c) => c.role === filter.modelRole)?.label;
-  const roleLabel = framework?.categories.find((c) => c.role === filter.role)?.label ?? (modelLabel && `${modelLabel}, by the model`);
+  const roleLabel = framework?.categories.find((c) => c.role === filter.role)?.label ?? (modelLabel && `${modelLabel}, labelled by AI`);
   const toggleType = (type: FileType) => {
     const hidden = new Set(filter.hiddenTypes);
     if (!hidden.delete(type)) hidden.add(type);
@@ -61,20 +61,18 @@ export function CategoryRail({ total, framework, roleCounts, modelRoleCounts, ty
         {framework ? (
           <>
             <p className="px-1.5 pt-2.5 pb-1 text-[10px] text-muted">{framework.label}</p>
-            {/* Every category, always in the same order; an empty one stays in its place. */}
-            {framework.categories.map(({ role, label }) => {
-              const count = roleCounts.get(role) ?? 0;
-              return (
+            {/* Always in the framework's order; a category with no files isn't listed, since there is nothing to filter to. */}
+            {framework.categories
+              .filter(({ role }) => (roleCounts.get(role) ?? 0) > 0)
+              .map(({ role, label }) => (
                 <CategoryButton
                   key={role}
                   label={label}
-                  count={count}
+                  count={roleCounts.get(role) ?? 0}
                   active={filter.role === role}
-                  disabled={count === 0}
                   onClick={() => onFilter({ ...filter, role: filter.role === role ? null : role, modelRole: null })}
                 />
-              );
-            })}
+              ))}
           </>
         ) : (
           <p className="px-1.5 pt-2.5 text-[10.5px] leading-relaxed text-muted">No framework recognised, so no file has a role from convention.</p>
@@ -82,7 +80,9 @@ export function CategoryRail({ total, framework, roleCounts, modelRoleCounts, ty
         {modelRoleCounts.size > 0 && (
           <>
             {/* Apart from convention's roles: a label is the model's reading, not something the code states. */}
-            <p className="px-1.5 pt-3 pb-1 text-[10px] text-muted">Labelled by the model</p>
+            <p className="px-1.5 pt-3 pb-1 text-[10px] text-muted" data-tip="Roles the AI read from files convention didn't identify. A reading, not something the code states.">
+              Labelled by AI
+            </p>
             {MODEL_CATEGORIES.filter(({ role }) => modelRoleCounts.has(role)).map(({ role, label }) => (
               <CategoryButton
                 key={role}
@@ -130,22 +130,19 @@ function CategoryButton({
   label,
   count,
   active,
-  disabled = false,
   onClick,
 }: {
   label: string;
   count: number;
   active: boolean;
-  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
       className={`flex shrink-0 items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs ${
-        active ? "bg-foreground font-medium text-surface" : disabled ? "text-muted/70" : "text-foreground/80 hover:bg-background"
+        active ? "bg-foreground font-medium text-surface" : "text-foreground/80 hover:bg-background"
       }`}
     >
       <span className="truncate">{label}</span>

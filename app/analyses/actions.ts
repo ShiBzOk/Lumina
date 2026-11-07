@@ -8,6 +8,8 @@ import { after } from "next/server";
 import { MODEL } from "@/lib/ai/client";
 import { aggregate, explainFile, explainFolder, type FolderFile } from "@/lib/ai/explain";
 import { getAnalysis, loadFileNeighbourhood, loadStructure } from "@/lib/analyses";
+import { NOTE_LIMIT, type Note } from "@/lib/map/notes";
+import { loadNotes } from "@/lib/notes";
 import type { ComparedAnalysis } from "@/lib/map/compare";
 import { fold } from "@/lib/map/fold";
 import { parseRepoInput, resolveCommit, type RepoRef, type ResolvedCommit } from "@/lib/pipeline/github";
@@ -340,4 +342,113 @@ export async function recordVisit(projectId: string): Promise<void> {
   if (error) throw new Error(`Could not record the visit: ${error.message}`);
   // The list kept in the browser still shows the marker; going back to it should not.
   revalidatePath("/");
+}
+
+export type NotesResult = { ok: true; notes: Note[] } | { ok: false; error: string };
+
+/**
+ * Notes are written as the person, through their own token, so the policies
+ * alone decide who may add, change or remove one. This checks only what a
+ * policy can't say well: that the text is plain, non-empty and within the
+ * limit, so the person is told rather than handed a constraint error.
+ * After a write the repository's notes are read again, which is the only
+ * time they are read apart from opening the map.
+ */
+function noteText(raw: string): { ok: true; body: string } | { ok: false; error: string } {
+  const body = raw.trim();
+  if (body === "") return { ok: false, error: "A note can't be empty." };
+  // Counted in characters, as the table counts them.
+  if ([...body].length > NOTE_LIMIT) return { ok: false, error: `A note is at most ${NOTE_LIMIT} characters.` };
+  return { ok: true, body };
+}
+
+async function afterWrite(projectId: string): Promise<NotesResult> {
+  return { ok: true, notes: await loadNotes(projectId) };
+}
+
+function failed(error: unknown): NotesResult {
+  // Returned rather than thrown: a thrown message is hidden in production, and this one is the user's to read.
+  return { ok: false, error: error instanceof Error ? error.message : String(error) };
+}
+
+/**
+ * The analysis a note is being written from, and the stamp its file has in it:
+ * the version and the content hash, read back from the stored rows as the
+ * person. The browser names only the analysis and the path; it never supplies
+ * a version or a hash. No stamp when the path isn't in this analysis.
+ */
+async function noteContext(analysisId: string, path: string) {
+  const analysis = await getAnalysis(analysisId);
+  if (!analysis) return null;
+  const { data, error } = await createServerSupabase()
+    .from("files")
+    .select("content_hash")
+    .eq("analysis_id", analysis.id)
+    .eq("path", path)
+    .maybeSingle();
+  if (error) throw new Error(`Could not read the file: ${error.message}`);
+  return { projectId: analysis.project_id, stamp: data ? { written_version: analysis.version, content_hash: data.content_hash } : null };
+}
+
+export async function addNote(analysisId: string, path: string, raw: string): Promise<NotesResult> {
+  try {
+    if (!UUID.test(analysisId)) return { ok: false, error: "No such analysis" };
+    if (path === "") return { ok: false, error: "A note belongs to a file." };
+    const text = noteText(raw);
+    if (!text.ok) return text;
+    const [{ orgId }, by, context] = await Promise.all([organization(), starter(), noteContext(analysisId, path)]);
+    if (!context) return { ok: false, error: "No such analysis" };
+    // A new note is always on a file of the analysis it is written from.
+    if (!context.stamp) return { ok: false, error: `${path} is not in this analysis` };
+    const { error } = await createServerSupabase()
+      .from("notes")
+      .insert({ org_id: orgId, project_id: context.projectId, path, author_id: by.id, author_name: by.name, body: text.body, ...context.stamp });
+    if (error) return { ok: false, error: `Could not save the note: ${error.message}` };
+    return await afterWrite(context.projectId);
+  } catch (error) {
+    return failed(error);
+  }
+}
+
+export async function editNote(analysisId: string, noteId: string, raw: string): Promise<NotesResult> {
+  try {
+    if (!UUID.test(analysisId) || !UUID.test(noteId)) return { ok: false, error: "No such note" };
+    const text = noteText(raw);
+    if (!text.ok) return text;
+    const supabase = createServerSupabase();
+    const found = await supabase.from("notes").select("path").eq("id", noteId).maybeSingle();
+    if (found.error) return { ok: false, error: `Could not read the note: ${found.error.message}` };
+    if (!found.data) return { ok: false, error: "No such note" };
+    const context = await noteContext(analysisId, found.data.path);
+    if (!context) return { ok: false, error: "No such analysis" };
+    const projectId = context.projectId;
+    // Editing on a map that has the file re-stamps it against that map;
+    // on one that doesn't, the stamp it had stays.
+    const { data, error } = await supabase
+      .from("notes")
+      .update({ body: text.body, edited_at: new Date().toISOString(), ...(context.stamp ?? {}) })
+      .eq("id", noteId)
+      .select("id");
+    if (error) return { ok: false, error: `Could not save the note: ${error.message}` };
+    // The policy shows another person's note to no update, so no row back means it isn't theirs, or isn't there.
+    if (data.length === 0) return { ok: false, error: "You can only change your own notes." };
+    return await afterWrite(projectId);
+  } catch (error) {
+    return failed(error);
+  }
+}
+
+export async function deleteNote(analysisId: string, noteId: string): Promise<NotesResult> {
+  try {
+    if (!UUID.test(analysisId) || !UUID.test(noteId)) return { ok: false, error: "No such note" };
+    const analysis = await getAnalysis(analysisId);
+    if (!analysis) return { ok: false, error: "No such analysis" };
+    const projectId = analysis.project_id;
+    const { data, error } = await createServerSupabase().from("notes").delete().eq("id", noteId).select("id");
+    if (error) return { ok: false, error: `Could not delete the note: ${error.message}` };
+    if (data.length === 0) return { ok: false, error: "You can only delete your own notes." };
+    return await afterWrite(projectId);
+  } catch (error) {
+    return failed(error);
+  }
 }

@@ -14,10 +14,20 @@ interface Result {
   name: string;
   path: string;
   pick: NonNullable<Selection>;
+  /** A file that carries a note. */
+  noted: boolean;
 }
 
 /** Plain substring match over folder and file paths, in a dialog opened from the header or Ctrl+K. */
-export function FileSearch({ nodes, onPick }: { nodes: readonly MapNode[]; onPick: (selection: NonNullable<Selection>) => void }) {
+export function FileSearch({
+  nodes,
+  noted,
+  onPick,
+}: {
+  nodes: readonly MapNode[];
+  noted: ReadonlySet<string>;
+  onPick: (selection: NonNullable<Selection>) => void;
+}) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -40,6 +50,7 @@ export function FileSearch({ nodes, onPick }: { nodes: readonly MapNode[]; onPic
         name: n.label,
         path: n.id === "." ? "./" : `${n.id}/`,
         pick: { kind: "node" as const, id: n.id },
+        noted: false,
       })),
       ...nodes.flatMap((n) =>
         n.files.map((f) => ({
@@ -48,10 +59,11 @@ export function FileSearch({ nodes, onPick }: { nodes: readonly MapNode[]; onPic
           name: f.path.slice(f.path.lastIndexOf("/") + 1),
           path: f.path,
           pick: { kind: "file" as const, path: f.path },
+          noted: noted.has(f.path),
         })),
       ),
     ],
-    [nodes],
+    [nodes, noted],
   );
 
   return (
@@ -160,6 +172,11 @@ function SearchDialog({
                   <span className="block truncate font-mono text-[12.5px]">{r.name}</span>
                   <span className="block truncate font-mono text-[10.5px] text-muted">{r.path}</span>
                 </span>
+                {r.noted && (
+                  <span className="shrink-0 text-muted" data-tip="Has notes">
+                    <Icon name="note" className="size-3.5" />
+                  </span>
+                )}
                 <span className="shrink-0 rounded-md bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted ring-1 ring-border">
                   {r.kind}
                 </span>

@@ -190,7 +190,7 @@ const PAGE = 10000;
 
 type Page<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null; count?: number | null }>;
 
-async function readAll<T>(what: string, page: (from: number, to: number, count: boolean) => Page<T>): Promise<T[]> {
+export async function readAll<T>(what: string, page: (from: number, to: number, count: boolean) => Page<T>): Promise<T[]> {
   const first = await page(0, PAGE - 1, true);
   if (first.error) throw new Error(`Could not read ${what}: ${first.error.message}`);
   const total = first.count ?? 0;

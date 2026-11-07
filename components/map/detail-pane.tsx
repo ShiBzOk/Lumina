@@ -11,6 +11,8 @@ import type { ImportRecord, RepoFile, Route, WithheldRoute } from "@/parser/type
 import { TYPE_COLOR } from "./colors";
 import { Explanation, explainKey, type ExplainState, type Handed } from "./explanation";
 import { Icon, type IconName } from "./icons";
+import { Notes, type NoteActions } from "./notes";
+import type { Note } from "@/lib/map/notes";
 
 import type { PaneTab } from "@/lib/map/view";
 
@@ -40,6 +42,10 @@ interface DetailPaneProps {
   /** Explanations fetched so far, by subject; they stay when the selection moves. */
   explanations: ReadonlyMap<string, ExplainState>;
   onExplain: (subject: NonNullable<Selection>) => void;
+  /** Every note of the repository, newest first, and who is reading them. */
+  notes: readonly Note[];
+  me: string;
+  noteActions: NoteActions;
   importsOf: ReadonlyMap<string, readonly ImportRecord[]>;
   graph: Adjacency;
   insights: Insights;
@@ -69,7 +75,9 @@ export function DetailPane(props: DetailPaneProps) {
   // The underline is one element that slides between the tabs, so it is
   // measured from them. Absent until measured, so it appears in place on
   // mount and only ever moves because a tab was clicked.
-  const tabs = useRef<Record<PaneTab, HTMLButtonElement | null>>({ structure: null, explanation: null });
+  const tabs = useRef<Record<PaneTab, HTMLButtonElement | null>>({ structure: null, explanation: null, notes: null });
+  // How many notes the selected file has, said on the tab so it is known before it is opened.
+  const noteCount = path === null ? 0 : props.notes.filter((n) => n.path === path).length;
   const [underline, setUnderline] = useState<{ x: number; width: number } | null>(null);
   useLayoutEffect(() => {
     const el = tabs.current[tab];
@@ -85,6 +93,10 @@ export function DetailPane(props: DetailPaneProps) {
         <TabButton active={tab === "explanation"} onClick={() => onTab("explanation")} ref={(el) => void (tabs.current.explanation = el)}>
           Explanation
         </TabButton>
+        <TabButton active={tab === "notes"} onClick={() => onTab("notes")} ref={(el) => void (tabs.current.notes = el)}>
+          Notes
+          {noteCount > 0 && <span className="ml-1 font-mono text-[10px] text-muted tabular-nums">{noteCount}</span>}
+        </TabButton>
         {underline && (
           <span
             aria-hidden
@@ -98,7 +110,9 @@ export function DetailPane(props: DetailPaneProps) {
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === "explanation" ? (
+        {tab === "notes" ? (
+          <Notes selection={selection} notes={props.notes} files={files} me={props.me} actions={props.noteActions} />
+        ) : tab === "explanation" ? (
           target ? (
             <Explanation
               subject={target}
@@ -171,15 +185,35 @@ function Empty({ icon, title, body }: { icon: IconName; title: string; body: str
   );
 }
 
-function SectionTitle({ icon, children, aside }: { icon?: IconName; children: ReactNode; aside?: ReactNode }) {
+// Sections are told apart by a hairline and a small muted label, not by
+// boxes: the pane was panel, card and row nested three deep. The first section
+// in its column has no rule above it. Icons are accepted but no longer drawn.
+function SectionTitle({ children, aside }: { icon?: IconName; children: ReactNode; aside?: ReactNode }) {
   return (
-    <div className="mt-4 mb-1.5 flex items-center gap-1 text-[11px] font-medium text-muted">
-      {icon && <Icon name={icon} className="size-3" />}
+    <div className="mt-4 mb-1 flex items-center gap-1 border-t border-border pt-3 text-[11px] font-semibold text-muted first:mt-3 first:border-t-0 first:pt-0">
       <span className="flex-1">{children}</span>
-      {aside}
+      {aside && <span className="font-normal">{aside}</span>}
     </div>
   );
 }
+
+/** An explanation, set apart from the data it explains. */
+function Callout({ children }: { children: ReactNode }) {
+  return (
+    <p className="mt-1 flex gap-1.5 text-[10.5px] leading-snug text-muted">
+      <Icon name="info" className="mt-px size-3 shrink-0 opacity-70" />
+      <span className="min-w-0">{children}</span>
+    </p>
+  );
+}
+
+/** How a row's count reads as a bar: its share of the largest in the list, in the colour that count already has on the map. */
+interface RowBar {
+  share: number;
+  tone: "in" | "out" | "neutral";
+}
+
+const BAR_TONE: Record<RowBar["tone"], string> = { in: "bg-incoming", out: "bg-outgoing", neutral: "bg-foreground/25" };
 
 function folderPath(id: string) {
   return id === "." ? "./" : `${id}/`;
@@ -193,6 +227,7 @@ function PathButton({
   path,
   label = path,
   aside,
+  bar,
   selected = false,
   hovered,
   onSelect,
@@ -202,6 +237,7 @@ function PathButton({
   /** Shown instead of the full path; the full path is always the tooltip. */
   label?: string;
   aside?: ReactNode;
+  bar?: RowBar;
   selected?: boolean;
   hovered: Selection;
   onSelect: (s: Selection) => void;
@@ -225,6 +261,11 @@ function PathButton({
       <span className={`min-w-0 flex-1 truncate font-mono text-[11px] ${selected ? "font-medium text-accent" : ""}`} dir="rtl">
         <bdi>{label}</bdi>
       </span>
+      {bar && (
+        <span className="h-1 w-12 shrink-0 overflow-hidden rounded-full bg-background" aria-hidden>
+          <span className={`block h-full rounded-full ${BAR_TONE[bar.tone]}`} style={{ width: `${Math.max(8, bar.share * 100)}%` }} />
+        </span>
+      )}
       {aside && <span className="flex shrink-0 gap-1.5 font-mono text-[9.5px] tabular-nums">{aside}</span>}
     </button>
   );
@@ -233,7 +274,7 @@ function PathButton({
 function PathList({ paths, empty, ...rest }: { paths: readonly string[]; empty: string; hovered: Selection; onSelect: (s: Selection) => void; onHover: (s: Selection) => void }) {
   if (paths.length === 0) return <p className="px-1 text-[11px] text-muted">{empty}</p>;
   return (
-    <div className="rounded-lg border border-border p-1">
+    <div className="-mx-1">
       {paths.map((p) => (
         <PathButton key={p} path={p} {...rest} />
       ))}
@@ -241,14 +282,20 @@ function PathList({ paths, empty, ...rest }: { paths: readonly string[]; empty: 
   );
 }
 
+/** One cell of a stat strip: the number first and large, its label under it. */
 function Stat({ label, value, note }: { label: string; value: ReactNode; note?: string }) {
   return (
-    <div className="min-w-0 rounded-md border border-border px-2 py-1.5">
-      <p className="text-[10px] text-muted">{label}</p>
-      <p className="font-mono text-[13px] font-semibold tabular-nums">{value}</p>
-      {note && <p className="truncate text-[9.5px] text-muted" title={note}>{note}</p>}
+    <div className="min-w-0 px-2.5 py-2">
+      <p className="font-mono text-[17px] leading-5 font-semibold tabular-nums">{value}</p>
+      <p className="mt-0.5 text-[10px] text-muted">{label}</p>
+      {note && <p className="truncate text-[9.5px] text-muted/80" title={note}>{note}</p>}
     </div>
   );
+}
+
+/** Stats read as one unit: a single rounded strip split by hairlines. */
+function StatStrip({ children }: { children: ReactNode }) {
+  return <div className="mt-3 grid grid-cols-3 divide-x divide-border rounded-lg bg-background/60 ring-1 ring-border">{children}</div>;
 }
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -287,9 +334,9 @@ function RouteTable({
   return (
     <>
       {routes.length === 0 ? (
-        <p className="px-1 text-[11px] text-muted">{empty}</p>
+        <Callout>{empty}</Callout>
       ) : (
-        <div className="rounded-lg border border-border p-1">
+        <div className="-mx-1">
           {shown.map((r) => {
             const target: Selection = { kind: "file", path: r.file };
             return (
@@ -323,7 +370,7 @@ function RouteTable({
           )}
         </div>
       )}
-      {note && <p className="mt-1 px-1 text-[10.5px] text-muted">{note}</p>}
+      {note && <Callout>{note}</Callout>}
       {withheld.length > 0 && (
         <>
           <button
@@ -336,7 +383,7 @@ function RouteTable({
             {withheld.length} withheld: method or path not exact
           </button>
           {showWithheld && (
-            <div className="mt-1 rounded-lg border border-border p-1">
+            <div className="-mx-1 mt-1">
               {withheld.map((w) => (
                 <button
                   key={`${w.file}:${w.line}:${w.reason}`}
@@ -364,11 +411,14 @@ function RouteTable({
 function RankedList({
   files,
   aside,
+  bar,
   empty,
   ...rest
 }: {
   files: readonly RepoFile[];
   aside: (f: RepoFile) => ReactNode;
+  /** The count each row's bar is drawn from, and its colour. Bars are relative to the largest in the list. */
+  bar?: { value: (f: RepoFile) => number; tone: RowBar["tone"] };
   empty: string;
   hovered: Selection;
   onSelect: (s: Selection) => void;
@@ -377,10 +427,11 @@ function RankedList({
   const [all, setAll] = useState(false);
   if (files.length === 0) return <p className="px-1 text-[11px] text-muted">{empty}</p>;
   const shown = all ? files : files.slice(0, LIST_LIMIT);
+  const max = bar ? Math.max(1, ...files.map(bar.value)) : 1;
   return (
-    <div className="rounded-lg border border-border p-1">
+    <div className="-mx-1">
       {shown.map((f) => (
-        <PathButton key={f.path} path={f.path} aside={aside(f)} {...rest} />
+        <PathButton key={f.path} path={f.path} aside={aside(f)} bar={bar && { share: bar.value(f) / max, tone: bar.tone }} {...rest} />
       ))}
       {files.length > LIST_LIMIT && (
         <button type="button" onClick={() => setAll((a) => !a)} className="w-full px-2 py-1 text-left text-[10.5px] text-muted hover:text-foreground">
@@ -408,15 +459,29 @@ function RepoStructure({
   const noAdapter = framework === null;
   return (
     <div className="px-3 pb-6">
-      <SectionTitle icon="repo">Repository</SectionTitle>
-      <p className="font-mono text-[12px] font-semibold break-all">{repo}</p>
-      <p className="mt-0.5 text-[11px] text-muted">{framework ? `Framework: ${framework.label}` : "No framework detected"}</p>
+      <div className="mt-3 flex items-center gap-2.5">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background text-foreground/70 ring-1 ring-border">
+          <Icon name="repo" className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-mono text-[13px] font-semibold" title={repo}>
+            {repo}
+          </p>
+          <p className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-muted">
+            {framework ? (
+              <span className="rounded px-1.5 py-px text-foreground/80 ring-1 ring-border">{framework.label}</span>
+            ) : (
+              "No framework detected"
+            )}
+          </p>
+        </div>
+      </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-1.5">
+      <StatStrip>
         <Stat label="Files" value={summary.files} />
         <Stat label="Imports" value={summary.imports} note={`${summary.resolvedImports} to repo files`} />
         <Stat label="Routes" value={routes.length} note={routesWithheld.length > 0 ? `${routesWithheld.length} withheld` : undefined} />
-      </div>
+      </StatStrip>
 
       <SectionTitle icon="network" aside={<span className="font-mono text-[10px]">{routes.length}</span>}>
         Routes
@@ -437,6 +502,7 @@ function RepoStructure({
       <RankedList
         files={summary.mostImported}
         aside={(f) => <span className="text-incoming">{f.fanIn} in</span>}
+        bar={{ value: (f) => f.fanIn, tone: "in" }}
         empty="No file in this repository imports another."
         hovered={hovered}
         onSelect={onSelect}
@@ -449,6 +515,7 @@ function RepoStructure({
       <RankedList
         files={summary.notImported}
         aside={(f) => <span className="text-outgoing">{f.fanOut} out</span>}
+        bar={{ value: (f) => f.fanOut, tone: "out" }}
         empty="Every file is imported by another."
         hovered={hovered}
         onSelect={onSelect}
@@ -460,12 +527,12 @@ function RepoStructure({
         <span className="font-mono font-semibold tabular-nums">{summary.unidentified}</span>
         <span className="text-muted"> of {summary.files} files</span>
       </p>
-      {noAdapter && <p className="mt-0.5 text-[10.5px] text-muted">No framework adapter applied, so no file has a role from convention.</p>}
+      {noAdapter && <Callout>No framework adapter applied, so no file has a role from convention.</Callout>}
       {modelRoles.size > 0 && (
-        <p className="mt-0.5 text-[10.5px] text-muted">
+        <Callout>
           <span className="font-mono text-foreground tabular-nums">{modelRoles.size}</span> of them labelled by the model, never as a page,
           route or controller.
-        </p>
+        </Callout>
       )}
 
       {/* Last, and shut until asked: this explains a codebase, it doesn't grade one. */}
@@ -506,6 +573,7 @@ function InsightList({
         <RankedList
           files={insights.notImported}
           aside={(f) => <span className="text-outgoing">{f.fanOut} out</span>}
+        bar={{ value: (f) => f.fanOut, tone: "out" }}
           empty="Every file without a framework role is imported by another."
           {...list}
         />
@@ -520,6 +588,7 @@ function InsightList({
       <RankedList
         files={insights.heavilyImported}
         aside={(f) => <span className="text-incoming">{f.fanIn} in</span>}
+        bar={{ value: (f) => f.fanIn, tone: "in" }}
         empty="No file is imported far more than the rest."
         {...list}
       />
@@ -530,7 +599,7 @@ function InsightList({
       ) : (
         <div className="flex flex-col gap-1.5">
           {insights.cycles.map((loop) => (
-            <div key={loop.join("\0")} className="rounded-lg border border-border p-1">
+            <div key={loop.join("\0")} className="-mx-1 rounded-lg bg-background/60 p-1">
               {loop.map((p, i) => (
                 <PathButton key={p} path={p} aside={<span className="text-muted">{i + 1}</span>} {...list} />
               ))}
@@ -544,6 +613,7 @@ function InsightList({
       <RankedList
         files={insights.long}
         aside={(f) => <span className="text-muted">{f.lines} lines</span>}
+        bar={{ value: (f) => f.lines ?? 0, tone: "neutral" }}
         empty="No file is that long."
         {...list}
       />
@@ -779,7 +849,7 @@ function FolderStructure({ map, node, hovered, onSelect, onHover }: DetailPanePr
     list.length === 0 ? (
       <p className="px-1 text-[11px] text-muted">{empty}</p>
     ) : (
-      <div className="rounded-lg border border-border p-1">
+      <div className="-mx-1">
         {list.map(([id, n]) => {
           const target: Selection = { kind: "node", id };
           return (
@@ -813,7 +883,7 @@ function FolderStructure({ map, node, hovered, onSelect, onHover }: DetailPanePr
       <p className="rounded-md border border-border bg-background px-2.5 py-2 font-mono text-[11px] break-all">{folderPath(node.id)}</p>
 
       <SectionTitle>Kinds of file inside</SectionTitle>
-      <div className="rounded-lg border border-border px-2 py-1">
+      <div className="px-1">
         {types.map((t) => (
           <div key={t.type} className="flex items-center gap-2 py-0.5 text-[11px]">
             <span className="size-1.5 shrink-0 rounded-full" style={{ background: TYPE_COLOR[t.type] }} aria-hidden />
@@ -833,7 +903,7 @@ function FolderStructure({ map, node, hovered, onSelect, onHover }: DetailPanePr
       {folderList(into, "No other folder on the map imports from it.")}
 
       <SectionTitle aside={<span className="font-mono text-[10px]">{node.files.length}</span>}>Files</SectionTitle>
-      <div className="rounded-lg border border-border p-1">
+      <div className="-mx-1">
         {node.files.map((f) => (
           <PathButton
             key={f.path}

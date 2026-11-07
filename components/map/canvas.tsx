@@ -69,6 +69,8 @@ interface CanvasProps {
   filter: Filter;
   /** Files added or changed since a compared base, by path; null outside Compare. */
   marks: ReadonlyMap<string, FileMark> | null;
+  /** Paths that carry a note, marked neutrally on their rows. */
+  noted: ReadonlySet<string>;
   onSelect: (selection: Selection) => void;
   onHover: (target: Selection) => void;
   /** Floats at the top centre of the canvas. */
@@ -89,6 +91,7 @@ export function Canvas({
   hovered,
   filter,
   marks,
+  noted,
   onSelect,
   onHover,
   banner,
@@ -111,7 +114,8 @@ export function Canvas({
   // First file shown in each card that holds more than MAX_VISIBLE_ROWS.
   const [offsets, setOffsets] = useState<ReadonlyMap<string, number>>(initial.offsets);
   useEffect(() => onView(compact, offsets), [compact, offsets, onView]);
-  const [minimap, setMinimap] = useState(true);
+  // On a small map the whole thing is already on screen, so the minimap would only repeat it.
+  const [minimap, setMinimap] = useState(map.nodes.length > 8);
   const [onlyLit, setOnlyLit] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const gesture = useRef<Gesture | null>(null);
@@ -518,6 +522,7 @@ export function Canvas({
             filtering={filtering}
             compact={compact}
             marks={marks}
+            noted={noted}
             offset={offsets.get(n.id) ?? 0}
             onSelectFile={onSelectFile}
           />
