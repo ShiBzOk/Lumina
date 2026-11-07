@@ -6,11 +6,13 @@ import { after } from "next/server";
 import { MODEL } from "@/lib/ai/client";
 import { aggregate, explainFile, explainFolder, type FolderFile } from "@/lib/ai/explain";
 import { getAnalysis, loadFileNeighbourhood, loadStructure } from "@/lib/analyses";
+import type { ComparedAnalysis } from "@/lib/map/compare";
 import { fold } from "@/lib/map/fold";
 import { parseRepoInput, resolveCommit, type RepoRef, type ResolvedCommit } from "@/lib/pipeline/github";
 import { runAnalysis } from "@/lib/pipeline/run";
 import { STALE_AFTER_MS } from "@/lib/stages";
 import { createServerSupabase, createWriterSupabase } from "@/lib/supabase";
+import { readCoverage } from "@/parser/io";
 
 export interface SubmitState {
   error: string | null;
@@ -265,6 +267,29 @@ export async function explain(analysisId: string, subject: ExplainSubject): Prom
     return { ok: true, ...result.value, cached: result.cached, model: MODEL };
   } catch (error) {
     // Returned rather than thrown: a thrown message is hidden in production, and this one is the user's to read.
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export type CompareSideResult = { ok: true; side: ComparedAnalysis } | { ok: false; error: string };
+
+/**
+ * The other side of a comparison: another finished analysis of the same
+ * repository as the one on screen, which is already in the browser. The
+ * comparison itself is worked out there, from what this returns.
+ */
+export async function loadCompareSide(headId: string, baseId: string): Promise<CompareSideResult> {
+  try {
+    const [head, base] = await Promise.all([getAnalysis(headId), getAnalysis(baseId)]);
+    if (!head || !base) return { ok: false, error: "No such analysis" };
+    if (base.project_id !== head.project_id) return { ok: false, error: "Only analyses of the same repository can be compared" };
+    if (base.status !== "complete" || !base.adapter || base.coverage === null) {
+      return { ok: false, error: "That analysis isn't complete, so it has no map to compare" };
+    }
+    const { files, edges } = await loadStructure(base);
+    const { skipped, excludedPaths } = readCoverage(base.coverage);
+    return { ok: true, side: { adapter: base.adapter, files, edges, coverage: { skipped, excludedPaths } } };
+  } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }

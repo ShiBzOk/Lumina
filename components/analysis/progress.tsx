@@ -5,7 +5,7 @@ import { rerunAnalysis } from "@/app/analyses/actions";
 import { Icon } from "@/components/map/icons";
 import { PetrolBand } from "@/components/petrol-band";
 import { Spinner } from "@/components/spinner";
-import { sameEvent, STAGE_LABEL, STAGES, type StageEvent } from "@/lib/stages";
+import { sameEvent, STAGE_LABEL, STAGES, versionName, type StageEvent } from "@/lib/stages";
 import { useAnalysisStage } from "@/lib/use-analysis-stage";
 import { LoadingAnalysis } from "./loading";
 
@@ -14,6 +14,7 @@ interface ProgressProps {
   repo: string;
   branch: string | null;
   commit: string | null;
+  version: number;
   initial: StageEvent;
   stale: boolean;
 }
@@ -22,7 +23,7 @@ interface ProgressProps {
 // current one carries the run's own message. The current one spins, because a
 // long stage with a still mark looks stuck; its message, which the run updates
 // with counts as it goes, is what says it isn't.
-export function AnalysisProgress({ id, repo, branch, commit, initial, stale: staleAtRender }: ProgressProps) {
+export function AnalysisProgress({ id, repo, branch, commit, version, initial, stale: staleAtRender }: ProgressProps) {
   const { event, unavailable } = useAnalysisStage(id, initial);
   // Any word from the run means it is alive, whatever the server thought.
   const stale = staleAtRender && sameEvent(event, initial);
@@ -55,12 +56,12 @@ export function AnalysisProgress({ id, repo, branch, commit, initial, stale: sta
             Repositories
           </Link>
           <h1 className="mt-4 truncate text-3xl leading-[1.05] font-semibold tracking-[-0.035em] text-white sm:text-4xl">{repo}</h1>
-          {(branch || commit) && (
-            <p className="mt-3 flex items-center gap-2 font-mono text-[11px] text-white/75">
-              {branch && <span className="rounded px-1.5 py-px ring-1 ring-white/30">{branch}</span>}
-              {commit && <span>{commit.slice(0, 7)}</span>}
-            </p>
-          )}
+          <p className="mt-3 flex items-center gap-2 font-mono text-[11px] text-white/75">
+            <span className="font-sans" title={commit ?? undefined}>
+              {versionName(version)}
+            </span>
+            {branch && <span className="rounded px-1.5 py-px ring-1 ring-white/30">{branch}</span>}
+          </p>
         </>
       }
     >

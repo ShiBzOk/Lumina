@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AccountButton } from "@/components/account-button";
 import { Logo } from "@/components/logo";
-import { explain } from "@/app/analyses/actions";
+import { explain, loadCompareSide } from "@/app/analyses/actions";
+import { compareAnalyses, type ComparedAnalysis } from "@/lib/map/compare";
 import { frameworkOf, MODEL_CATEGORIES, type ModelRole } from "@/lib/map/frameworks";
 import { highlight, isFiltering, matches, NO_FILTER, sameSelection, type Filter, type Selection } from "@/lib/map/highlight";
 import { adjacency } from "@/lib/map/graph";
@@ -22,6 +24,8 @@ import { Icon } from "./icons";
 import { FileSearch } from "./file-search";
 import { RepoSwitcher, type RepositoryOption } from "./repo-switcher";
 import { AnalysisSwitcher, type AnalysisOption } from "./analysis-switcher";
+import { ComparePane, type CompareState } from "./compare-pane";
+import type { FileMark } from "./node-card";
 
 interface MapWorkspaceProps {
   meta: { analysisId: string; repo: string; branch: string | null; commit: string };
@@ -39,11 +43,34 @@ interface MapWorkspaceProps {
   routesWithheld: WithheldRoute[];
   coverage: Coverage;
   labels: { path: string; role: ModelRole }[];
+  /** A base to open Compare against, from the address; ignored unless it is one of this repository's finished analyses. */
+  compareBase: string | null;
+}
+
+/** A compared base as it arrives: asked for once, then kept for the visit. */
+type SideState = { status: "error"; message: string } | { status: "done"; side: ComparedAnalysis };
+
+function compareUrl(analysisId: string, base: string | null) {
+  return base === null ? `/analyses/${analysisId}` : `/analyses/${analysisId}?compare=${base}`;
 }
 
 // The shell: header across the top, categories on the left, the canvas in the
 // middle, details on the right. Later phases add to these panels, not move them.
-export function MapWorkspace({ meta, repositories, analyses, latest, adapter, files, edges, imports, routes, routesWithheld, coverage, labels }: MapWorkspaceProps) {
+export function MapWorkspace({
+  meta,
+  repositories,
+  analyses,
+  latest,
+  adapter,
+  files,
+  edges,
+  imports,
+  routes,
+  routesWithheld,
+  coverage,
+  labels,
+  compareBase,
+}: MapWorkspaceProps) {
   const modelRoles = useMemo(() => new Map(labels.map((l) => [l.path, l.role])), [labels]);
   const map = useMemo(() => buildMap(files, edges, modelRoles), [files, edges, modelRoles]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -73,8 +100,85 @@ export function MapWorkspace({ meta, repositories, analyses, latest, adapter, fi
     [meta.analysisId],
   );
 
+  // Compare is a mode of the whole right-hand pane. The head is always the
+  // analysis on screen; choosing another head goes to that analysis's map.
+  // The choice is held against the analysis it was made on, so arriving at
+  // another one starts from that page's address instead of carrying it over.
+  const router = useRouter();
+  const finished = useMemo(() => analyses.filter((a) => a.status === "complete"), [analyses]);
+  const [compareChoice, setCompareChoice] = useState<{ head: string; base: string | null } | null>(null);
+  const fromAddress = compareBase !== null && finished.some((a) => a.id === compareBase) ? compareBase : null;
+  // With one finished map the only pair is that map against itself, so Compare waits for a second.
+  const canCompare = finished.length > 1;
+  const base = !canCompare ? null : compareChoice?.head === meta.analysisId ? compareChoice.base : fromAddress;
+  const chooseBase = useCallback(
+    (next: string | null) => {
+      setCompareChoice({ head: meta.analysisId, base: next });
+      // Kept in the address so a reload lands back here; no request, no navigation.
+      window.history.replaceState(null, "", compareUrl(meta.analysisId, next));
+    },
+    [meta.analysisId],
+  );
+  const toggleCompare = () => {
+    if (base !== null) return chooseBase(null);
+    // The one before this, against this. With nothing earlier, this against itself, which says so.
+    const at = finished.findIndex((a) => a.id === meta.analysisId);
+    chooseBase(finished[at + 1]?.id ?? meta.analysisId);
+    setPaneOpen(true);
+  };
+  const chooseHead = (head: string) => {
+    if (head !== meta.analysisId && base !== null) router.push(compareUrl(head, base));
+  };
+
+  const [sides, setSides] = useState<ReadonlyMap<string, SideState>>(new Map());
+  const asked = useRef(new Set<string>());
+  useEffect(() => {
+    if (base === null || base === meta.analysisId || asked.current.has(base)) return;
+    asked.current.add(base);
+    const set = (state: SideState) => setSides((prev) => new Map(prev).set(base, state));
+    // A failure may be asked again by choosing it again; a success is kept.
+    loadCompareSide(meta.analysisId, base).then(
+      (r) => {
+        if (!r.ok) asked.current.delete(base);
+        set(r.ok ? { status: "done", side: r.side } : { status: "error", message: r.error });
+      },
+      (error: unknown) => {
+        asked.current.delete(base);
+        set({ status: "error", message: error instanceof Error ? error.message : "The request failed" });
+      },
+    );
+  }, [base, meta.analysisId]);
+
+  const headSide = useMemo<ComparedAnalysis>(() => ({ adapter, files, edges, coverage }), [adapter, files, edges, coverage]);
+  const baseSide = base === null ? undefined : sides.get(base);
+  const comparison = useMemo(
+    () => (base !== null && base !== meta.analysisId && baseSide?.status === "done" ? compareAnalyses(baseSide.side, headSide) : null),
+    [base, meta.analysisId, baseSide, headSide],
+  );
+  const compareState: CompareState = comparison
+    ? { status: "done", comparison }
+    : baseSide?.status === "error"
+      ? { status: "error", message: baseSide.message }
+      : { status: "loading" };
+  const marks = useMemo(() => {
+    if (!comparison) return null;
+    const m = new Map<string, FileMark>();
+    for (const p of comparison.filesAdded) m.set(p, "added");
+    for (const p of comparison.contentChanged) m.set(p, "changed");
+    return m;
+  }, [comparison]);
+  const headPaths = useMemo(() => new Set(files.map((f) => f.path)), [files]);
+  // Moves the map without touching the selection, so leaving Compare returns to it.
+  const reveal = useCallback(
+    (path: string) => {
+      const id = map.nodeOf.get(path);
+      if (id) canvas.current?.reveal(id, path);
+    },
+    [map],
+  );
+
   const lit = useMemo(() => highlight(map, selection), [map, selection]);
-  const analysed = useMemo(() => new Map(analyses.flatMap((a) => (a.commit ? [[a.commit, a.id] as const] : []))), [analyses]);
+  const analysed = useMemo(() => new Map(analyses.flatMap((a) => (a.commit ? [[a.commit, { id: a.id, version: a.version }] as const] : []))), [analyses]);
   const summary = useMemo(() => summarize(files, imports), [files, imports]);
   const byPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
   const importsOf = useMemo(
@@ -143,6 +247,19 @@ export function MapWorkspace({ meta, repositories, analyses, latest, adapter, fi
         <span className="h-5 w-px bg-border" aria-hidden />
         <RepoSwitcher repo={meta.repo} repositories={repositories} />
         <AnalysisSwitcher current={current} latest={latest} analyses={analyses} />
+        {canCompare && (
+        <button
+          type="button"
+          aria-pressed={base !== null}
+          onClick={toggleCompare}
+          title={base !== null ? "Leave Compare" : "Compare with another analysis of this repository"}
+          className={`rounded-lg border px-2.5 py-1.5 text-[11px] ${
+            base !== null ? "border-accent/50 bg-accent/8 text-accent" : "border-border hover:bg-background"
+          }`}
+        >
+          Compare
+        </button>
+        )}
 
         <div className="flex flex-1 items-center justify-center gap-2 font-mono text-[11px] text-muted">
           <span>{files.length} files</span>·<span>{edges.length} dependency links</span>
@@ -152,7 +269,7 @@ export function MapWorkspace({ meta, repositories, analyses, latest, adapter, fi
         <AccountButton />
       </header>
 
-      <NewCommitsBanner analysisId={meta.analysisId} branch={meta.branch} commit={meta.commit} analysed={analysed} />
+      <NewCommitsBanner analysisId={meta.analysisId} branch={meta.branch} commit={meta.commit} version={current.version} analysed={analysed} />
       <CoverageBanner coverage={coverage} />
 
       <div className="flex min-h-0 flex-1">
@@ -176,6 +293,7 @@ export function MapWorkspace({ meta, repositories, analyses, latest, adapter, fi
           highlight={lit}
           hovered={hovered}
           filter={filter}
+          marks={marks}
           onSelect={select}
           onHover={hover}
           banner={
@@ -231,6 +349,22 @@ export function MapWorkspace({ meta, repositories, analyses, latest, adapter, fi
         </Canvas>
 
         <Drawer open={paneOpen} side="right" width="19rem">
+          {base !== null ? (
+            <ComparePane
+              analyses={finished}
+              base={base}
+              head={meta.analysisId}
+              state={compareState}
+              inHead={headPaths}
+              hovered={hovered}
+              onBase={chooseBase}
+              onHead={chooseHead}
+              onReveal={reveal}
+              onHover={hover}
+              onExit={() => chooseBase(null)}
+              onCollapse={() => setPaneOpen(false)}
+            />
+          ) : (
           <DetailPane
             map={map}
             repo={meta.repo}
@@ -255,6 +389,7 @@ export function MapWorkspace({ meta, repositories, analyses, latest, adapter, fi
             onHover={hover}
             onCollapse={() => setPaneOpen(false)}
           />
+          )}
         </Drawer>
       </div>
     </div>

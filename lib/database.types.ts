@@ -37,6 +37,7 @@ export type Database = {
           stage_changed_at: string
           stage_message: string | null
           status: Database["public"]["Enums"]["analysis_status"]
+          version: number
         }
         Insert: {
           adapter?: string | null
@@ -57,6 +58,7 @@ export type Database = {
           stage_changed_at?: string
           stage_message?: string | null
           status?: Database["public"]["Enums"]["analysis_status"]
+          version?: number
         }
         Update: {
           adapter?: string | null
@@ -77,6 +79,7 @@ export type Database = {
           stage_changed_at?: string
           stage_message?: string | null
           status?: Database["public"]["Enums"]["analysis_status"]
+          version?: number
         }
         Relationships: [
           {
@@ -433,6 +436,7 @@ export type Database = {
           created_at: string
           description: string | null
           id: string
+          last_version: number
           org_id: string
           repo_name: string
           repo_owner: string
@@ -441,6 +445,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          last_version?: number
           org_id: string
           repo_name: string
           repo_owner: string
@@ -449,6 +454,7 @@ export type Database = {
           created_at?: string
           description?: string | null
           id?: string
+          last_version?: number
           org_id?: string
           repo_name?: string
           repo_owner?: string

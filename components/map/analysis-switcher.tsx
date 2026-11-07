@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { Menu, MENU_ROW, MenuHeading } from "@/components/menu";
-import { KEPT_ANALYSES, type AnalysisStatus } from "@/lib/stages";
+import { KEPT_ANALYSES, versionName, type AnalysisStatus } from "@/lib/stages";
 import { Icon } from "./icons";
 
 export interface AnalysisOption {
   id: string;
+  /** Its number within the repository, which is what it is called. */
+  version: number;
   /** Null only on a row from before commits were resolved up front that failed before reaching one. */
   commit: string | null;
   branch: string | null;
@@ -40,10 +42,10 @@ export function AnalysisSwitcher({
       icon="branch"
       label={
         <span className="flex items-center gap-2 font-mono">
-          {current.branch && <span>{current.branch}</span>}
-          <span className="text-muted" title={current.commit ?? undefined}>
-            {current.commit?.slice(0, 7)}
+          <span className="font-sans font-medium" title={current.commit ?? undefined}>
+            {versionName(current.version)}
           </span>
+          {current.branch && <span className="text-muted">{current.branch}</span>}
           <span className="font-sans text-muted">{current.ran}</span>
           {earlier && <span className="rounded bg-background px-1 font-sans text-[10px] ring-1 ring-border">earlier analysis</span>}
         </span>
@@ -57,8 +59,8 @@ export function AnalysisSwitcher({
           <div className="max-h-72 overflow-y-auto px-1 pb-1">
             {analyses.map((a) => (
               <Link key={a.id} href={`/analyses/${a.id}`} onClick={close} className={`${MENU_ROW} text-[11px]`}>
-                <span className="w-14 shrink-0 font-mono" title={a.commit ?? undefined}>
-                  {a.commit?.slice(0, 7) ?? "—"}
+                <span className="w-16 shrink-0 font-medium" title={a.commit ?? undefined}>
+                  {versionName(a.version)}
                 </span>
                 <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted">{a.branch}</span>
                 {/* Only a finished analysis has a map; the others open on their progress or failure. */}
@@ -75,7 +77,7 @@ export function AnalysisSwitcher({
           {oldest && (
             <p className="border-t border-border px-3 py-2 text-[10px] leading-relaxed text-muted">
               A repository keeps its {KEPT_ANALYSES} most recent analyses. The next one to finish removes the oldest,{" "}
-              <span className="font-mono">{oldest.commit?.slice(0, 7) ?? "—"}</span> from {oldest.ran}.
+              {versionName(oldest.version)} from {oldest.ran}.
             </p>
           )}
         </>

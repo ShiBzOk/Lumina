@@ -19,6 +19,16 @@ export const STAGE_LABEL: Record<AnalysisStage, string> = {
 // Nothing here has a queue or a timeout, so a process that died mid-run leaves
 // a row that will say "parsing" forever. Ten minutes without the stage or its
 // message moving is past anything a working run spends in one place.
+/**
+ * What an analysis is called. The number is its repository's own count, given
+ * once when the analysis is created and never reused, so it names the same
+ * map after older ones are dropped. It counts runs, not commits: analysing an
+ * older commit later gets a higher number.
+ */
+export function versionName(version: number): string {
+  return `Version ${version}`;
+}
+
 export const STALE_AFTER_MS = 10 * 60 * 1000;
 
 export function isStale(status: AnalysisStatus, stageChangedAt: string, now: number): boolean {

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { RemapButton, useHeadCheck } from "@/components/new-commits";
+import { versionName } from "@/lib/stages";
 import { Icon } from "./icons";
 
 // Checked when the map opens, so a map drawn from an older commit says so
@@ -12,13 +13,16 @@ export function NewCommitsBanner({
   analysisId,
   branch,
   commit,
+  version,
   analysed,
 }: {
   analysisId: string;
   branch: string | null;
   commit: string;
+  /** This map's version, which is what it is called. */
+  version: number;
   /** The repository's analyses by commit, so a tip already analysed is opened rather than re-mapped. */
-  analysed: ReadonlyMap<string, string>;
+  analysed: ReadonlyMap<string, { id: string; version: number }>;
 }) {
   const check = useHeadCheck(analysisId, branch !== null);
   if (!branch || !check || check.state === "current") return null;
@@ -30,22 +34,17 @@ export function NewCommitsBanner({
       {check.state === "moved" ? (
         <>
           <span className="min-w-0 flex-1">
-            <span className="font-mono">{branch}</span> has new commits. This map is of{" "}
-            <span className="font-mono" title={commit}>
-              {commit.slice(0, 7)}
-            </span>
-            ; the branch is now at{" "}
-            <span className="font-mono" title={check.head}>
-              {check.head.slice(0, 7)}
-            </span>
-            {existing ? ", which is already mapped." : "."}
+            <span className="font-mono">{branch}</span> has{" "}
+            <span title={`now at ${check.head}`}>new commits</span> since{" "}
+            <span title={commit}>{versionName(version)}</span>
+            {existing ? <>. Its latest commit is already mapped as {versionName(existing.version)}.</> : " was mapped."}
           </span>
           {existing ? (
             <Link
-              href={`/analyses/${existing}`}
+              href={`/analyses/${existing.id}`}
               className="flex h-6 shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 font-medium text-white hover:bg-accent/90"
             >
-              Open {check.head.slice(0, 7)}
+              Open {versionName(existing.version)}
               <Icon name="arrowRight" className="size-3" />
             </Link>
           ) : (

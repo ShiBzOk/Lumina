@@ -18,7 +18,7 @@ const RAN = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", y
 
 // One address for an analysis from start to finish: its progress while it
 // runs, its map once stored. A finished run refreshes this page into the map.
-async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["params"] }) {
+async function Analysis({ params, searchParams }: PageProps<"/analyses/[id]">) {
   const { id } = await params;
   // The repository switcher's list doesn't depend on this analysis, so it is read alongside it.
   const [analysis, repositories] = await Promise.all([getAnalysis(id), listRepositories()]);
@@ -33,14 +33,16 @@ async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["param
       loadGraph(analysis),
       listProjectAnalyses(analysis.project_id),
     ]);
-    const option = (a: { id: string; commit_sha: string | null; branch: string | null; status: AnalysisStatus; created_at: string }) => ({
+    const option = (a: { id: string; version: number; commit_sha: string | null; branch: string | null; status: AnalysisStatus; created_at: string }) => ({
       id: a.id,
+      version: a.version,
       commit: a.commit_sha,
       branch: a.branch,
       status: a.status,
       ran: RAN.format(new Date(a.created_at)),
     });
     // The list is capped; the one being looked at is always in it.
+    const { compare } = await searchParams;
     const analyses = history.some((a) => a.id === analysis.id) ? history.map(option) : [...history, analysis].map(option);
     // Only what the browser needs crosses over; everything the panes show is derived from these.
     return (
@@ -57,6 +59,7 @@ async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["param
         routesWithheld={routesWithheld}
         coverage={coverage}
         labels={labels}
+        compareBase={typeof compare === "string" ? compare : null}
       />
     );
   }
@@ -70,6 +73,7 @@ async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["param
           repo={repo}
           branch={analysis.branch}
           commit={analysis.commit_sha}
+          version={analysis.version}
           initial={{
             status: analysis.status,
             stage: analysis.stage,
@@ -82,11 +86,11 @@ async function Analysis({ params }: { params: PageProps<"/analyses/[id]">["param
   );
 }
 
-export default function AnalysisPage({ params }: PageProps<"/analyses/[id]">) {
+export default function AnalysisPage({ params, searchParams }: PageProps<"/analyses/[id]">) {
   return (
     <PageTransition>
       <Suspense fallback={<LoadingAnalysis />}>
-        <Analysis params={params} />
+        <Analysis params={params} searchParams={searchParams} />
       </Suspense>
     </PageTransition>
   );

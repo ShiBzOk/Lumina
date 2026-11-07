@@ -8,6 +8,14 @@ import { DIRECTION_COLOR, TYPE_COLOR } from "./colors";
 import type { Sides } from "./canvas";
 import { Icon } from "./icons";
 
+/** What Compare says about a file on the head map. Removed files have no mark: they aren't on it. */
+export type FileMark = "added" | "changed";
+
+const MARK: Record<FileMark, { glyph: string; title: string }> = {
+  added: { glyph: "+", title: "Added since base" },
+  changed: { glyph: "~", title: "Content changed since base" },
+};
+
 interface NodeCardProps {
   node: MapNode;
   position: Point;
@@ -21,6 +29,7 @@ interface NodeCardProps {
   filtering: boolean;
   /** Header only: no file rows. */
   compact: boolean;
+  marks: ReadonlyMap<string, FileMark> | null;
   /** Index of the first file shown; the card shows MAX_VISIBLE_ROWS from here. */
   offset: number;
   onSelectFile: (path: string) => void;
@@ -36,9 +45,12 @@ export const NodeCard = memo(function NodeCard({
   filter,
   filtering,
   compact,
+  marks,
   offset,
   onSelectFile,
 }: NodeCardProps) {
+  // With rows hidden, the header is the only place a marked file can show.
+  const marked = compact && marks !== null && node.files.some((f) => marks.has(f.path));
   const selectedFile = selection?.kind === "file" ? selection.path : null;
   const shown = node.files.slice(offset, offset + MAX_VISIBLE_ROWS);
   const overflow = node.files.length > MAX_VISIBLE_ROWS;
@@ -70,7 +82,14 @@ export const NodeCard = memo(function NodeCard({
           <Icon name="folder" className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] leading-[18px] font-semibold">{node.label}</p>
+          <p className="truncate text-[13px] leading-[18px] font-semibold">
+            {node.label}
+            {marked && (
+              <span className="ml-1.5 font-mono text-[11px] font-medium text-accent" title="Holds files added or changed since base">
+                ±
+              </span>
+            )}
+          </p>
           <p className="truncate font-mono text-[10.5px] leading-4 text-muted">{node.id === "." ? "./" : `${node.id}/`}</p>
         </div>
         <span className="shrink-0 rounded-full bg-background px-2 py-0.5 font-mono text-[10.5px] text-muted">
@@ -106,6 +125,7 @@ export const NodeCard = memo(function NodeCard({
             traced={traced?.get(f.path)}
             dimmed={f.path !== hoveredFile && !traced?.has(f.path) && ((highlight !== null && !highlight.files.has(f.path)) || (filtering && !matches(f, filter)))}
             handles={highlight?.handles.get(f.path)}
+            mark={marks?.get(f.path)}
             onSelect={onSelectFile}
           />
         ))}
@@ -133,6 +153,7 @@ function Row({
   traced,
   dimmed,
   handles,
+  mark,
   onSelect,
 }: {
   file: FileRow;
@@ -141,6 +162,7 @@ function Row({
   traced: Sides | undefined;
   dimmed: boolean;
   handles: { left?: Direction; right?: Direction } | undefined;
+  mark: FileMark | undefined;
   onSelect: (path: string) => void;
 }) {
   return (
@@ -163,6 +185,11 @@ function Row({
       <RowHandle side="left" direction={handles?.left} traced={traced?.left} />
       <span className="size-1.5 shrink-0 rounded-full" style={{ background: TYPE_COLOR[file.type] }} aria-hidden />
       <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{file.label}</span>
+      {mark && (
+        <span className="shrink-0 font-mono text-[11px] font-medium text-accent" title={MARK[mark].title}>
+          {MARK[mark].glyph}
+        </span>
+      )}
       <span className="flex shrink-0 gap-2 font-mono text-[10px] tabular-nums">
         {file.fanIn > 0 && <span className="text-incoming">{file.fanIn} in</span>}
         {file.fanOut > 0 && <span className="text-outgoing">{file.fanOut} out</span>}

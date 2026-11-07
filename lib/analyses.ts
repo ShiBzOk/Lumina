@@ -42,7 +42,7 @@ export async function listRepositories() {
     .from("projects")
     .select(
       `id, repo_owner, repo_name,
-       latest:${ANALYSES}(id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, file_count, package_count, created_at),
+       latest:${ANALYSES}(id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, version, file_count, package_count, created_at),
        finished:${ANALYSES}(id)`,
     )
     .order("created_at", { referencedTable: "latest", ascending: false })
@@ -81,7 +81,7 @@ export async function listProjectAnalyses(projectId: string) {
   const supabase = await reader();
   const { data, error } = await supabase
     .from("analyses")
-    .select("id, status, branch, commit_sha, created_at")
+    .select("id, status, branch, commit_sha, version, created_at")
     .eq("project_id", projectId)
     .order("created_at", { ascending: false })
     .limit(KEPT_ANALYSES + 5);
@@ -98,7 +98,7 @@ export async function getAnalysis(id: string) {
   const { data, error } = await supabase
     .from("analyses")
     .select(
-      `id, project_id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, adapter, coverage, routes_withheld, created_at, ${PROJECT}`,
+      `id, project_id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, version, adapter, coverage, routes_withheld, created_at, ${PROJECT}`,
     )
     .eq("id", id)
     .maybeSingle();

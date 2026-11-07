@@ -8,7 +8,7 @@ import { DIRECTION_COLOR } from "./colors";
 import { Icon, type IconName } from "./icons";
 import { Minimap, type Bounds } from "./minimap";
 import { lerp, spring } from "./motion";
-import { NodeCard } from "./node-card";
+import { NodeCard, type FileMark } from "./node-card";
 
 export interface Viewport {
   x: number;
@@ -67,6 +67,8 @@ interface CanvasProps {
   /** Lit wherever it is on the map, whether the pointer is over it here or in the pane. */
   hovered: Selection;
   filter: Filter;
+  /** Files added or changed since a compared base, by path; null outside Compare. */
+  marks: ReadonlyMap<string, FileMark> | null;
   onSelect: (selection: Selection) => void;
   onHover: (target: Selection) => void;
   /** Floats at the top centre of the canvas. */
@@ -76,7 +78,7 @@ interface CanvasProps {
   ref?: Ref<CanvasHandle>;
 }
 
-export function Canvas({ map, selection, highlight, hovered, filter, onSelect, onHover, banner, children, ref }: CanvasProps) {
+export function Canvas({ map, selection, highlight, hovered, filter, marks, onSelect, onHover, banner, children, ref }: CanvasProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
   // Each starts as its layout itself, so "moved" is just "no longer the same map".
@@ -496,6 +498,7 @@ export function Canvas({ map, selection, highlight, hovered, filter, onSelect, o
             filter={filter}
             filtering={filtering}
             compact={compact}
+            marks={marks}
             offset={offsets.get(n.id) ?? 0}
             onSelectFile={onSelectFile}
           />

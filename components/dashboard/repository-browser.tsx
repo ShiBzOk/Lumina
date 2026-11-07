@@ -6,7 +6,7 @@ import { submitRepository, type SubmitState } from "@/app/analyses/actions";
 import { Icon } from "@/components/map/icons";
 import { RemapButton, useHeadCheck } from "@/components/new-commits";
 import { PetrolBand } from "@/components/petrol-band";
-import { formatCount, sameEvent, STAGE_LABEL, type AnalysisStage, type AnalysisStatus } from "@/lib/stages";
+import { formatCount, sameEvent, STAGE_LABEL, versionName, type AnalysisStage, type AnalysisStatus } from "@/lib/stages";
 import { useAnalysisStage } from "@/lib/use-analysis-stage";
 
 /** A repository, described by its latest analysis. */
@@ -19,6 +19,7 @@ export interface RepositoryRow {
   /** Null when the latest analysis was asked for by commit. */
   branch: string | null;
   commit: string | null;
+  version: number;
   status: AnalysisStatus;
   stage: AnalysisStage | null;
   /** The stage message while running, the reason once failed. */
@@ -163,7 +164,9 @@ function Row({ row }: { row: RepositoryRow }) {
       <Link href={`/analyses/${row.open}`} className="group flex h-10 min-w-0 flex-1 items-center gap-3 px-4">
         <span className="min-w-0 truncate font-mono text-xs">{row.repo}</span>
         {row.branch && <span className="shrink-0 font-mono text-[10px] text-muted">{row.branch}</span>}
-        {row.commit && <span className="shrink-0 font-mono text-[10px] text-muted">{row.commit.slice(0, 7)}</span>}
+        <span className="shrink-0 text-[10px] text-muted" title={row.commit ?? undefined}>
+          {versionName(row.version)}
+        </span>
         <span className={`min-w-0 flex-1 truncate text-right text-[11px] ${failed ? "text-danger" : "text-muted"}`}>
           {note ?? (row.files !== null ? <span className="font-mono text-[10px] tabular-nums">{formatCount(row.files)} files</span> : null)}
         </span>

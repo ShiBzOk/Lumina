@@ -16,6 +16,7 @@ async function Repositories({ searchParams }: { searchParams: PageProps<"/">["se
     repo: a.repo,
     branch: a.branch,
     commit: a.commit_sha,
+    version: a.version,
     status: a.status,
     stage: a.stage,
     message: a.status === "failed" ? a.error : a.stage_message,
