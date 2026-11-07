@@ -12,6 +12,7 @@ import { TYPE_COLOR } from "./colors";
 import { Explanation, explainKey, type ExplainState, type Handed } from "./explanation";
 import { Icon, type IconName } from "./icons";
 import { Notes, type NoteActions } from "./notes";
+import { Stat, StatStrip } from "./stat";
 import type { Note } from "@/lib/map/notes";
 
 import type { PaneTab } from "@/lib/map/view";
@@ -116,7 +117,11 @@ export function DetailPane(props: DetailPaneProps) {
           target ? (
             <Explanation
               subject={target}
-              handed={target.kind === "file" ? fileHanded(target.path, graph) : folderHanded(node?.files.map((f) => f.path) ?? [], graph)}
+              handed={
+                target.kind === "file"
+                  ? fileHanded(target.path, files.get(target.path)?.lines ?? null, graph)
+                  : folderHanded(node?.files.map((f) => f.path) ?? [], graph)
+              }
               unexplainable={target.kind === "file" && files.get(target.path)?.kind === "asset" ? "Assets aren't parsed, so there is nothing to explain from." : null}
               state={props.explanations.get(explainKey(target))}
               onExplain={() => props.onExplain(target)}
@@ -141,11 +146,11 @@ export function DetailPane(props: DetailPaneProps) {
   );
 }
 
-function fileHanded(path: string, graph: Adjacency): Handed[] {
+function fileHanded(path: string, lines: number | null, graph: Adjacency): Handed[] {
   return [
-    { icon: "fileCode", label: "Source" },
-    { icon: "arrowUpRight", label: "Files it imports", count: graph.out.get(path)?.length ?? 0, tone: "out" },
-    { icon: "arrowDownLeft", label: "Files importing it", count: graph.in.get(path)?.length ?? 0, tone: "in" },
+    { label: "Lines of source", count: lines },
+    { label: "Files it imports", count: graph.out.get(path)?.length ?? 0, tone: "out" },
+    { label: "Files importing it", count: graph.in.get(path)?.length ?? 0, tone: "in" },
   ];
 }
 
@@ -154,9 +159,9 @@ function folderHanded(paths: readonly string[], graph: Adjacency): Handed[] {
   const inside = new Set(paths);
   const crossing = (links: Adjacency["out"]) => paths.reduce((n, p) => n + (links.get(p) ?? []).filter((q) => !inside.has(q)).length, 0);
   return [
-    { icon: "folder", label: "Files in it", count: paths.length },
-    { icon: "arrowUpRight", label: "Imports out of it", count: crossing(graph.out), tone: "out" },
-    { icon: "arrowDownLeft", label: "Imports into it", count: crossing(graph.in), tone: "in" },
+    { label: "Files in it", count: paths.length },
+    { label: "Imports out of it", count: crossing(graph.out), tone: "out" },
+    { label: "Imports into it", count: crossing(graph.in), tone: "in" },
   ];
 }
 
@@ -280,22 +285,6 @@ function PathList({ paths, empty, ...rest }: { paths: readonly string[]; empty: 
       ))}
     </div>
   );
-}
-
-/** One cell of a stat strip: the number first and large, its label under it. */
-function Stat({ label, value, note }: { label: string; value: ReactNode; note?: string }) {
-  return (
-    <div className="min-w-0 px-2.5 py-2">
-      <p className="font-mono text-[17px] leading-5 font-semibold tabular-nums">{value}</p>
-      <p className="mt-0.5 text-[10px] text-muted">{label}</p>
-      {note && <p className="truncate text-[9.5px] text-muted/80" title={note}>{note}</p>}
-    </div>
-  );
-}
-
-/** Stats read as one unit: a single rounded strip split by hairlines. */
-function StatStrip({ children }: { children: ReactNode }) {
-  return <div className="mt-3 grid grid-cols-3 divide-x divide-border rounded-lg bg-background/60 ring-1 ring-border">{children}</div>;
 }
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -645,39 +634,53 @@ function FileStructure({
   const dependsOn = graph.out.get(path) ?? [];
   const dependedOnBy = graph.in.get(path) ?? [];
   const ext = path.includes(".") ? path.slice(path.lastIndexOf(".")) : "no extension";
+  const name = path.slice(path.lastIndexOf("/") + 1);
   const list = { hovered, onSelect, onHover };
+  const chip = "rounded px-1.5 py-px text-foreground/80 ring-1 ring-border";
+  const tone = (n: number, color: string) => (n === 0 ? "text-muted" : color);
 
   return (
     <div className="px-3 pb-6">
-      <SectionTitle>
-        <span className="text-xs font-semibold text-accent">Selected file</span>
-      </SectionTitle>
-      <PathButton path={path} selected {...list} />
+      {/* Headed like the repository: an icon tile, the name, what it is as chips. */}
+      <div className="mt-3 flex items-center gap-2.5">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background text-foreground/70 ring-1 ring-border">
+          <Icon name="fileCode" className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-mono text-[13px] font-semibold" title={path}>
+            {name}
+          </p>
+          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px] text-muted">
+            <span className={`${chip} inline-flex items-center gap-1 font-mono`}>
+              <span className="size-1.5 rounded-full" style={{ background: TYPE_COLOR[fileTypeOf(path)] }} aria-hidden />
+              {ext}
+            </span>
+            {file?.role && <span className={chip}>{framework?.categories.find((c) => c.role === file.role)?.label ?? file.role}</span>}
+            {modelRole && (
+              <span className={chip} title="Labelled by the model, not by convention">
+                {MODEL_CATEGORIES.find((c) => c.role === modelRole)?.label} · model
+              </span>
+            )}
+            {file?.kind === "asset" && <span>asset, not parsed</span>}
+          </p>
+        </div>
+      </div>
 
-      <div className="mt-2">
-        <Fact label="Kind">
-          <span className="inline-flex flex-wrap items-center gap-x-1.5">
-            <span className="size-1.5 rounded-full" style={{ background: TYPE_COLOR[fileTypeOf(path)] }} aria-hidden />
-            <span className="font-mono">{ext}</span>
-            <span className="text-muted">· {file?.kind === "asset" ? "asset, not parsed" : "parsed source"}</span>
-            {file?.role && <span className="text-muted">· {framework?.categories.find((c) => c.role === file.role)?.label ?? file.role}</span>}
-            {modelRole && <span className="text-muted">· {MODEL_CATEGORIES.find((c) => c.role === modelRole)?.label}, labelled by the model</span>}
-          </span>
-        </Fact>
-        <Fact label="Length">
-          <span className="font-mono tabular-nums">
-            {file?.lines != null ? `${file.lines} lines · ` : ""}
-            {file ? `${file.bytes} bytes` : ""}
-          </span>
-        </Fact>
-        {nodeId !== undefined && (
+      <StatStrip>
+        <Stat label="Lines" value={file?.lines ?? "—"} note={file ? `${file.bytes} bytes` : undefined} />
+        <Stat label="Imports" value={dependsOn.length} note={external.size > 0 ? `+${external.size} external` : undefined} valueClass={tone(dependsOn.length, "text-outgoing")} />
+        <Stat label="Imported by" value={dependedOnBy.length} valueClass={tone(dependedOnBy.length, "text-incoming")} />
+      </StatStrip>
+
+      {nodeId !== undefined && (
+        <div className="mt-2">
           <Fact label="Folder">
             <button type="button" onClick={() => onSelect({ kind: "node", id: nodeId })} className="font-mono break-all hover:text-accent">
               {folderPath(nodeId)}
             </button>
           </Fact>
-        )}
-      </div>
+        </div>
+      )}
       {file?.kind === "asset" && (
         <p className="mt-1 text-[10.5px] text-muted">On the map because a parsed import resolved to it.</p>
       )}

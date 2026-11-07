@@ -3,8 +3,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { ExplainResult } from "@/app/analyses/actions";
 import type { Selection } from "@/lib/map/highlight";
-import { Icon, type IconName } from "./icons";
+import { Icon } from "./icons";
 import { Prose } from "./prose";
+import { Stat, StatStrip } from "./stat";
 
 /** What the pane knows about one subject's explanation. Kept by the workspace, so it outlives the selection. */
 export type ExplainState =
@@ -12,11 +13,10 @@ export type ExplainState =
   | { status: "error"; message: string }
   | ({ status: "done" } & Extract<ExplainResult, { ok: true }>);
 
-/** One thing the model is given. A count is how many the parser found; in and out are coloured as on the map. */
+/** One thing the model is given. A count is what the parser found, null when it didn't; in and out are coloured as on the map. */
 export interface Handed {
-  icon: IconName;
   label: string;
-  count?: number;
+  count: number | null;
   tone?: "in" | "out";
 }
 
@@ -58,6 +58,8 @@ export function Explanation({ subject, handed, unexplainable, state, onExplain, 
         </div>
       </div>
 
+      {!unexplainable && <HandedStrip items={handed} />}
+
       <div className="flex-1">
         {unexplainable ? (
           <div className="mt-3">
@@ -65,7 +67,9 @@ export function Explanation({ subject, handed, unexplainable, state, onExplain, 
           </div>
         ) : state === undefined ? (
           <>
-            <HandedList items={handed} />
+            <div className="mt-2">
+              <Callout>The model is given the {noun} and these counts, as the parser found them.</Callout>
+            </div>
             <button
               type="button"
               onClick={onExplain}
@@ -75,7 +79,7 @@ export function Explanation({ subject, handed, unexplainable, state, onExplain, 
             </button>
           </>
         ) : state.status === "loading" ? (
-          <Waiting noun={noun} since={state.since} handed={handed} />
+          <Waiting noun={noun} since={state.since} />
         ) : state.status === "error" ? (
           <>
             <Heading>Explanation</Heading>
@@ -127,40 +131,27 @@ export function Explanation({ subject, handed, unexplainable, state, onExplain, 
   );
 }
 
-// Laid out like the Structure tab's lists, so the two tabs read as one pane.
-function HandedList({ items }: { items: Handed[] }) {
+// The Structure tab's repository strip, so the two tabs read as one pane. In
+// and out keep their map colours; a zero goes muted, since nothing flows.
+function HandedStrip({ items }: { items: Handed[] }) {
   return (
-    <>
-      <Heading aside={<span className="text-[10px]">as the parser found them</span>}>Given to the model</Heading>
-      <div className="-mx-1">
-        {items.map(({ icon, label, count, tone }) => (
-          <div key={label} className="flex items-center gap-2 px-2 py-1.5 text-[11px]">
-            <Icon name={icon} className="size-3 shrink-0 text-muted" />
-            <span className="min-w-0 flex-1 truncate">{label}</span>
-            {count !== undefined && tone && (
-              <span className="h-1 w-12 shrink-0 overflow-hidden rounded-full bg-background" aria-hidden>
-                <span
-                  className={`block h-full rounded-full ${tone === "in" ? "bg-incoming" : "bg-outgoing"}`}
-                  style={{ width: count === 0 ? 0 : `${Math.max(8, (count / Math.max(1, ...items.map((i) => i.count ?? 0))) * 100)}%` }}
-                />
-              </span>
-            )}
-            {count !== undefined && (
-              <span className={`font-mono text-[10px] tabular-nums ${count === 0 ? "text-muted" : tone === "in" ? "text-incoming" : tone === "out" ? "text-outgoing" : "text-muted"}`}>
-                {count}
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-    </>
+    <StatStrip>
+      {items.map(({ label, count, tone }) => (
+        <Stat
+          key={label}
+          label={label}
+          value={count ?? "—"}
+          valueClass={count === null || count === 0 ? "text-muted" : tone === "in" ? "text-incoming" : tone === "out" ? "text-outgoing" : ""}
+        />
+      ))}
+    </StatStrip>
   );
 }
 
 // The server says nothing until the whole answer is ready, so this shows only
 // what is known: a request is out, for how long, and what it carries. No
 // stages, because none are reported; a step shown on a timer would be made up.
-function Waiting({ noun, since, handed }: { noun: string; since: number; handed: Handed[] }) {
+function Waiting({ noun, since }: { noun: string; since: number }) {
   return (
     <div role="status" aria-live="polite">
       <Heading aside={<Elapsed key={since} since={since} />}>
@@ -180,9 +171,6 @@ function Waiting({ noun, since, handed }: { noun: string; since: number; handed:
       </div>
       <div className="mt-3">
         <Callout>One already in the cache comes back at once. A new one appears in full once the model has finished writing it.</Callout>
-      </div>
-      <div className="opacity-60">
-        <HandedList items={handed} />
       </div>
     </div>
   );
