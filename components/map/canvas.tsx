@@ -138,6 +138,30 @@ export function Canvas({
     [],
   );
 
+  // While the view is moving, the map is its own GPU layer, so a pan or zoom
+  // shifts pixels already painted instead of repainting every curve and line
+  // of text each frame. Once it has been still a moment the layer is dropped
+  // and the browser paints it again at the zoom it ended on, because a layer
+  // kept around stays at the zoom it was painted at and its text blurs.
+  const layerRef = useRef<HTMLDivElement>(null);
+  const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const el = layerRef.current;
+    if (!el) return;
+    el.style.willChange = "transform";
+    if (settle.current) clearTimeout(settle.current);
+    settle.current = setTimeout(() => {
+      el.style.willChange = "";
+      settle.current = null;
+    }, 150);
+  }, [viewport]);
+  useEffect(
+    () => () => {
+      if (settle.current) clearTimeout(settle.current);
+    },
+    [],
+  );
+
   const stopGlide = useCallback(() => {
     glide.current?.cancel();
     glide.current = null;
@@ -497,9 +521,9 @@ export function Canvas({
         backgroundSize: "24px 24px",
       }}
     >
-      {/* No will-change here: it freezes the layer's pixels at the zoom it was
-          painted at, and every card's text blurs once you zoom past it. */}
+      {/* will-change is only set while the view moves; see layerRef. */}
       <div
+        ref={layerRef}
         className="absolute top-0 left-0 origin-top-left transition-opacity duration-300 ease-out starting:opacity-0"
         style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})` }}
       >
