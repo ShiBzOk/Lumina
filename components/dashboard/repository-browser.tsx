@@ -15,6 +15,8 @@ export interface RepositoryRow {
   id: string;
   /** Where opening the repository lands: the latest map, or a run in progress. */
   open: string;
+  /** That analysis's address. */
+  openPath: string;
   repo: string;
   /** Null when the latest analysis was asked for by commit. */
   branch: string | null;
@@ -161,7 +163,7 @@ function Row({ row }: { row: RepositoryRow }) {
 
   return (
     <li className="flex items-center border-t border-border first:border-t-0 hover:bg-background">
-      <Link href={`/analyses/${row.open}`} className="group flex h-10 min-w-0 flex-1 items-center gap-3 px-4">
+      <Link href={row.openPath} className="group flex h-10 min-w-0 flex-1 items-center gap-3 px-4">
         <span className="min-w-0 truncate font-mono text-xs">{row.repo}</span>
         {row.branch && <span className="shrink-0 font-mono text-[10px] text-muted">{row.branch}</span>}
         <span className="shrink-0 text-[10px] text-muted" title={row.commit ?? undefined}>

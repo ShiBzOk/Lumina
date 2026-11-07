@@ -22,7 +22,7 @@ export function NewCommitsBanner({
   /** This map's version, which is what it is called. */
   version: number;
   /** The repository's analyses by commit, so a tip already analysed is opened rather than re-mapped. */
-  analysed: ReadonlyMap<string, { id: string; version: number }>;
+  analysed: ReadonlyMap<string, { id: string; path: string; version: number }>;
 }) {
   const check = useHeadCheck(analysisId, branch !== null);
   if (!branch || !check || check.state === "current") return null;
@@ -41,7 +41,7 @@ export function NewCommitsBanner({
           </span>
           {existing ? (
             <Link
-              href={`/analyses/${existing.id}`}
+              href={existing.path}
               className="flex h-6 shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 font-medium text-white hover:bg-accent/90"
             >
               Open {versionName(existing.version)}

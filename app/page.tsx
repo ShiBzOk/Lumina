@@ -13,6 +13,7 @@ async function Repositories({ searchParams }: { searchParams: PageProps<"/">["se
   const rows: RepositoryRow[] = repositories.map((a) => ({
     id: a.id,
     open: a.open,
+    openPath: a.openPath,
     repo: a.repo,
     branch: a.branch,
     commit: a.commit_sha,

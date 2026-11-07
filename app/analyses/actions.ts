@@ -1,5 +1,6 @@
 "use server";
 
+import { analysisPath } from "@/lib/analysis-path";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
@@ -109,18 +110,18 @@ async function analyse(target: { orgId: string; projectId: string; repo: RepoRef
   const inserted = await db
     .from("analyses")
     .insert({ org_id: orgId, project_id: projectId, branch: commit.branch, commit_sha: commit.sha })
-    .select("id")
+    .select("id, version")
     .single();
   if (inserted.error) {
     if (inserted.error.code !== "23505") throw new Error(`Could not start the analysis: ${inserted.error.message}`);
-    const existing = await db.from("analyses").select("id").eq("project_id", projectId).eq("commit_sha", commit.sha).single();
+    const existing = await db.from("analyses").select("id, version").eq("project_id", projectId).eq("commit_sha", commit.sha).single();
     if (existing.error) throw new Error(`Could not find the existing analysis: ${existing.error.message}`);
-    redirect(`/analyses/${existing.data.id}`);
+    redirect(analysisPath({ ...existing.data, owner: repo.owner, name: repo.name }));
   }
 
   const request = { analysisId: inserted.data.id, projectId, orgId, repo, commit: commit.sha, branch: commit.branch, attempt: 0 };
   after(() => runAnalysis(request));
-  redirect(`/analyses/${inserted.data.id}`);
+  redirect(analysisPath({ ...inserted.data, owner: repo.owner, name: repo.name }));
 }
 
 /**
@@ -186,7 +187,7 @@ export async function rerunAnalysis(analysisId: string): Promise<void> {
       runAnalysis({ analysisId: analysis.id, projectId: analysis.project_id, orgId, repo, commit, branch: analysis.branch, attempt }),
     );
   }
-  redirect(`/analyses/${analysis.id}`);
+  redirect(analysisPath({ id: analysis.id, owner: repo_owner, name: repo_name, version: analysis.version }));
 }
 
 export type ExplainSubject = { kind: "file"; path: string } | { kind: "node"; id: string };

@@ -37,7 +37,7 @@ export function CategoryRail({ total, framework, roleCounts, modelRoleCounts, ty
         <span className="text-xs font-medium">Categories</span>
         <span className="font-mono text-[10px] text-muted">· {total} files</span>
         <span className="flex-1" />
-        <button type="button" onClick={onCollapse} title="Hide categories" className="rounded p-1 text-muted hover:bg-background">
+        <button type="button" onClick={onCollapse} data-tip="Hide categories" aria-label="Hide categories" className="rounded p-1 text-muted hover:bg-background">
           <Icon name="chevronLeft" className="size-3.5" />
         </button>
       </div>

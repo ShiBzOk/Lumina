@@ -10,14 +10,16 @@ import { frameworkOf, MODEL_CATEGORIES, type ModelRole } from "@/lib/map/framewo
 import { highlight, isFiltering, matches, NO_FILTER, sameSelection, type Filter, type Selection } from "@/lib/map/highlight";
 import { adjacency } from "@/lib/map/graph";
 import { findInsights } from "@/lib/map/insights";
+import { MAX_VISIBLE_ROWS } from "@/lib/map/layout";
 import { buildMap, fileTypeOf } from "@/lib/map/model";
+import { DEFAULT_VIEW, readView, writeView, type Address, type View } from "@/lib/map/view";
 import { summarize } from "@/lib/map/summary";
 import type { Coverage, Edge, ImportRecord, RepoFile, Route, WithheldRoute } from "@/parser/types";
 import { Canvas, type CanvasHandle } from "./canvas";
 import { CategoryRail } from "./category-rail";
 import { CoverageBanner } from "./coverage-banner";
 import { NewCommitsBanner } from "./new-commits-banner";
-import { DetailPane, type PaneTab } from "./detail-pane";
+import { DetailPane, type PaneTab, type WalkState } from "./detail-pane";
 import { Drawer } from "./drawer";
 import { explainKey, type ExplainState } from "./explanation";
 import { Icon } from "./icons";
@@ -26,6 +28,8 @@ import { RepoSwitcher, type RepositoryOption } from "./repo-switcher";
 import { AnalysisSwitcher, type AnalysisOption } from "./analysis-switcher";
 import { ComparePane, type CompareState } from "./compare-pane";
 import type { FileMark } from "./node-card";
+import { CopyLink } from "./copy-link";
+import { MissingFromLink } from "./missing-from-link";
 
 interface MapWorkspaceProps {
   meta: { analysisId: string; repo: string; branch: string | null; commit: string };
@@ -43,16 +47,12 @@ interface MapWorkspaceProps {
   routesWithheld: WithheldRoute[];
   coverage: Coverage;
   labels: { path: string; role: ModelRole }[];
-  /** A base to open Compare against, from the address; ignored unless it is one of this repository's finished analyses. */
-  compareBase: string | null;
+  /** The page's search params: the view to open on. Read once; after that the view writes the address. */
+  address: Address;
 }
 
 /** A compared base as it arrives: asked for once, then kept for the visit. */
 type SideState = { status: "error"; message: string } | { status: "done"; side: ComparedAnalysis };
-
-function compareUrl(analysisId: string, base: string | null) {
-  return base === null ? `/analyses/${analysisId}` : `/analyses/${analysisId}?compare=${base}`;
-}
 
 // The shell: header across the top, categories on the left, the canvas in the
 // middle, details on the right. Later phases add to these panels, not move them.
@@ -69,17 +69,34 @@ export function MapWorkspace({
   routesWithheld,
   coverage,
   labels,
-  compareBase,
+  address,
 }: MapWorkspaceProps) {
   const modelRoles = useMemo(() => new Map(labels.map((l) => [l.path, l.role])), [labels]);
   const map = useMemo(() => buildMap(files, edges, modelRoles), [files, edges, modelRoles]);
-  const [selection, setSelection] = useState<Selection>(null);
+  const finished = useMemo(() => analyses.filter((a) => a.status === "complete"), [analyses]);
+  // With one finished map the only pair is that map against itself, so Compare waits for a second.
+  const canCompare = finished.length > 1;
+  // The view the address names, checked against this analysis once. Server
+  // and browser read it from the same inputs, so both render the same. The
+  // page keys this component by analysis, so another analysis reads its own.
+  const [restored] = useState(() =>
+    readView(address, {
+      files: new Set(files.map((f) => f.path)),
+      folders: new Map(map.nodes.map((n) => [n.id, Math.max(0, n.files.length - MAX_VISIBLE_ROWS)])),
+      comparable: new Set(canCompare ? finished.map((a) => a.id) : []),
+    }),
+  );
+  const [missing, setMissing] = useState(restored.missing);
+  const [selection, setSelection] = useState<Selection>(restored.view.selection);
   // What the pointer is over, on the map or in the pane; each lights it in the other.
   const [hovered, setHovered] = useState<Selection>(null);
   const [filter, setFilter] = useState<Filter>(NO_FILTER);
   const [railOpen, setRailOpen] = useState(true);
   const [paneOpen, setPaneOpen] = useState(true);
-  const [tab, setTab] = useState<PaneTab>("structure");
+  const [tab, setTab] = useState<PaneTab>(restored.view.tab);
+  const [walk, setWalk] = useState<WalkState>({ direction: restored.view.walk, depth: restored.view.depth });
+  const [cards, setCards] = useState({ compact: restored.view.compact, offsets: restored.view.scroll });
+  const onCardsView = useCallback((compact: boolean, offsets: ReadonlyMap<string, number>) => setCards({ compact, offsets }), []);
   // Lives here so it stays shut until asked, however often the pane redraws.
   const [insightsOpen, setInsightsOpen] = useState(false);
   const canvas = useRef<CanvasHandle>(null);
@@ -102,33 +119,31 @@ export function MapWorkspace({
 
   // Compare is a mode of the whole right-hand pane. The head is always the
   // analysis on screen; choosing another head goes to that analysis's map.
-  // The choice is held against the analysis it was made on, so arriving at
-  // another one starts from that page's address instead of carrying it over.
   const router = useRouter();
-  const finished = useMemo(() => analyses.filter((a) => a.status === "complete"), [analyses]);
-  const [compareChoice, setCompareChoice] = useState<{ head: string; base: string | null } | null>(null);
-  const fromAddress = compareBase !== null && finished.some((a) => a.id === compareBase) ? compareBase : null;
-  // With one finished map the only pair is that map against itself, so Compare waits for a second.
-  const canCompare = finished.length > 1;
-  const base = !canCompare ? null : compareChoice?.head === meta.analysisId ? compareChoice.base : fromAddress;
-  const chooseBase = useCallback(
-    (next: string | null) => {
-      setCompareChoice({ head: meta.analysisId, base: next });
-      // Kept in the address so a reload lands back here; no request, no navigation.
-      window.history.replaceState(null, "", compareUrl(meta.analysisId, next));
-    },
-    [meta.analysisId],
-  );
+  const [base, setBase] = useState<string | null>(restored.view.compare);
   const toggleCompare = () => {
-    if (base !== null) return chooseBase(null);
+    if (base !== null) return setBase(null);
     // The one before this, against this. With nothing earlier, this against itself, which says so.
     const at = finished.findIndex((a) => a.id === meta.analysisId);
-    chooseBase(finished[at + 1]?.id ?? meta.analysisId);
+    setBase(finished[at + 1]?.id ?? meta.analysisId);
     setPaneOpen(true);
   };
   const chooseHead = (head: string) => {
-    if (head !== meta.analysisId && base !== null) router.push(compareUrl(head, base));
+    if (head !== meta.analysisId && base !== null) router.push(`${analyses.find((a) => a.id === head)?.path ?? `/analyses/${head}`}${writeView({ ...DEFAULT_VIEW, compare: base })}`);
   };
+
+  // This analysis's own address; the view goes after it.
+  const here = analyses.find((a) => a.id === meta.analysisId)?.path ?? `/analyses/${meta.analysisId}`;
+  // The address follows the view, replacing its history entry rather than
+  // adding one, so Back leaves the map instead of stepping through clicks.
+  const view = useMemo<View>(
+    () => ({ selection, tab, walk: walk.direction, depth: walk.depth, compact: cards.compact, scroll: cards.offsets, compare: base }),
+    [selection, tab, walk, cards, base],
+  );
+  useEffect(() => {
+    const next = `${here}${writeView(view)}`;
+    if (next !== window.location.pathname + window.location.search) window.history.replaceState(null, "", next);
+  }, [view, here]);
 
   const [sides, setSides] = useState<ReadonlyMap<string, SideState>>(new Map());
   const asked = useRef(new Set<string>());
@@ -178,7 +193,7 @@ export function MapWorkspace({
   );
 
   const lit = useMemo(() => highlight(map, selection), [map, selection]);
-  const analysed = useMemo(() => new Map(analyses.flatMap((a) => (a.commit ? [[a.commit, { id: a.id, version: a.version }] as const] : []))), [analyses]);
+  const analysed = useMemo(() => new Map(analyses.flatMap((a) => (a.commit ? [[a.commit, { id: a.id, path: a.path, version: a.version }] as const] : []))), [analyses]);
   const summary = useMemo(() => summarize(files, imports), [files, imports]);
   const byPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
   const importsOf = useMemo(
@@ -243,33 +258,42 @@ export function MapWorkspace({
   return (
     <div className="flex h-screen flex-col bg-background">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
-        <Logo />
-        <span className="h-5 w-px bg-border" aria-hidden />
-        <RepoSwitcher repo={meta.repo} repositories={repositories} />
-        <AnalysisSwitcher current={current} latest={latest} analyses={analyses} />
-        {canCompare && (
-        <button
-          type="button"
-          aria-pressed={base !== null}
-          onClick={toggleCompare}
-          title={base !== null ? "Leave Compare" : "Compare with another analysis of this repository"}
-          className={`rounded-lg border px-2.5 py-1.5 text-[11px] ${
-            base !== null ? "border-accent/50 bg-accent/8 text-accent" : "border-border hover:bg-background"
-          }`}
-        >
-          Compare
-        </button>
-        )}
-
-        <div className="flex flex-1 items-center justify-center gap-2 font-mono text-[11px] text-muted">
-          <span>{files.length} files</span>·<span>{edges.length} dependency links</span>
+        {/* Where you are on the left, as a breadcrumb; what you can do on the right.
+            Only the repository name gives way when the header narrows. */}
+        <div className="shrink-0">
+          <Logo />
+        </div>
+        <span className="h-5 w-px shrink-0 bg-border" aria-hidden />
+        <div className="flex min-w-0 items-center gap-1">
+          <RepoSwitcher repo={meta.repo} repositories={repositories} />
+          <Icon name="chevronRight" className="size-3 shrink-0 text-muted" />
+          <div className="shrink-0">
+            <AnalysisSwitcher current={current} latest={latest} analyses={analyses} />
+          </div>
         </div>
 
-        <FileSearch nodes={map.nodes} onPick={selectAndReveal} />
-        <AccountButton />
+        <div className="flex flex-1 shrink-0 items-center justify-end gap-2">
+          <FileSearch nodes={map.nodes} onPick={selectAndReveal} />
+          {canCompare && (
+            <button
+              type="button"
+              aria-pressed={base !== null}
+              onClick={toggleCompare}
+              data-tip={base !== null ? "Leave Compare" : "See what changed between two analyses of this repository"}
+              className={`rounded-lg border px-2.5 py-1.5 text-[11px] ${
+                base !== null ? "border-accent/50 bg-accent/8 text-accent" : "border-border hover:bg-background"
+              }`}
+            >
+              Compare
+            </button>
+          )}
+          <CopyLink path={here} view={view} />
+          <AccountButton />
+        </div>
       </header>
 
       <NewCommitsBanner analysisId={meta.analysisId} branch={meta.branch} commit={meta.commit} version={current.version} analysed={analysed} />
+      <MissingFromLink missing={missing} onDismiss={() => setMissing([])} />
       <CoverageBanner coverage={coverage} />
 
       <div className="flex min-h-0 flex-1">
@@ -296,6 +320,8 @@ export function MapWorkspace({
           marks={marks}
           onSelect={select}
           onHover={hover}
+          initial={{ compact: restored.view.compact, offsets: restored.view.scroll }}
+          onView={onCardsView}
           banner={
             <div className="flex items-center gap-2 rounded-full bg-surface/95 px-3.5 py-1.5 text-[11px] whitespace-nowrap text-muted shadow-[0_1px_6px_rgba(16,24,40,0.06)] ring-1 ring-border">
               {filtering ? (
@@ -316,7 +342,8 @@ export function MapWorkspace({
                 <>
                   <Icon name="layers" className="size-3.5" />
                   <span>
-                    {map.nodes.length} folders from {files.length} files · click a card or file to trace its connections
+                    {map.nodes.length} folders · {files.length} files · {edges.length} dependency links · click a card or file to trace
+                    its connections
                   </span>
                 </>
               )}
@@ -328,7 +355,7 @@ export function MapWorkspace({
             <button
               data-overlay
               type="button"
-              title="Show categories"
+              data-tip="Show categories" aria-label="Show categories"
               onClick={() => setRailOpen(true)}
               className="absolute top-3 left-3 flex size-9 items-center justify-center rounded-xl bg-surface text-muted shadow-[0_1px_6px_rgba(16,24,40,0.06)] ring-1 ring-border transition-[opacity,scale] delay-200 duration-200 ease-out hover:text-foreground starting:scale-90 starting:opacity-0"
             >
@@ -339,7 +366,7 @@ export function MapWorkspace({
             <button
               data-overlay
               type="button"
-              title="Show details"
+              data-tip="Show details" aria-label="Show details"
               onClick={() => setPaneOpen(true)}
               className="absolute top-32 right-3 flex size-9 items-center justify-center rounded-xl bg-surface text-muted shadow-[0_1px_6px_rgba(16,24,40,0.06)] ring-1 ring-border transition-[opacity,scale] delay-200 duration-200 ease-out hover:text-foreground starting:scale-90 starting:opacity-0"
             >
@@ -357,11 +384,11 @@ export function MapWorkspace({
               state={compareState}
               inHead={headPaths}
               hovered={hovered}
-              onBase={chooseBase}
+              onBase={setBase}
               onHead={chooseHead}
               onReveal={reveal}
               onHover={hover}
-              onExit={() => chooseBase(null)}
+              onExit={() => setBase(null)}
               onCollapse={() => setPaneOpen(false)}
             />
           ) : (
@@ -385,6 +412,8 @@ export function MapWorkspace({
             onInsightsOpen={setInsightsOpen}
             tab={tab}
             onTab={setTab}
+            walk={walk}
+            onWalk={setWalk}
             onSelect={selectAndReveal}
             onHover={hover}
             onCollapse={() => setPaneOpen(false)}

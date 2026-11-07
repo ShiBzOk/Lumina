@@ -59,6 +59,7 @@ export function OrganizationSwitcher() {
 
   return (
     <Menu
+      tip="Switch organization"
       icon="building"
       defaultOpen={fromEmail}
       label={

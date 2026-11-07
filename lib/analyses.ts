@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { analysisPath } from "@/lib/analysis-path";
 import { MODEL_ROLES, type ModelRole } from "@/lib/map/frameworks";
 import { createServerSupabase } from "@/lib/supabase";
 import { isStale, KEPT_ANALYSES } from "@/lib/stages";
@@ -43,7 +44,7 @@ export async function listRepositories() {
     .select(
       `id, repo_owner, repo_name,
        latest:${ANALYSES}(id, status, stage, stage_message, stage_changed_at, error, branch, commit_sha, version, file_count, package_count, created_at),
-       finished:${ANALYSES}(id)`,
+       finished:${ANALYSES}(id, version)`,
     )
     .order("created_at", { referencedTable: "latest", ascending: false })
     .limit(1, { referencedTable: "latest" })
@@ -60,6 +61,7 @@ export async function listRepositories() {
       const [latest] = p.latest;
       if (!latest) return [];
       const live = latest.status === "queued" || latest.status === "running";
+      const opened = live ? latest : (p.finished[0] ?? latest);
       return [
         {
           ...latest,
@@ -67,7 +69,8 @@ export async function listRepositories() {
           stale: isStale(latest.status, latest.stage_changed_at, now),
           // A run in progress opens on its progress; otherwise the latest map,
           // so a failed re-run doesn't stand between a repository and its map.
-          open: live ? latest.id : (p.finished[0]?.id ?? latest.id),
+          open: opened.id,
+          openPath: analysisPath({ id: opened.id, owner: p.repo_owner, name: p.repo_name, version: opened.version }),
         },
       ];
     })
@@ -107,6 +110,38 @@ export async function getAnalysis(id: string) {
 }
 
 export type Analysis = NonNullable<Awaited<ReturnType<typeof getAnalysis>>>;
+
+/**
+ * An analysis by its readable address. Null when the organization has no such
+ * repository, which, like a missing id, can't be told apart from another
+ * organization's. A repository it does have says whether the version was
+ * removed or never reached: numbers are never reused, so one at or below the
+ * last handed out that has no row was removed when newer ones finished.
+ */
+export async function findAnalysis(owner: string, name: string, version: number) {
+  const supabase = await reader();
+  const project = await supabase
+    .from("projects")
+    .select("id, repo_owner, repo_name, last_version")
+    .eq("repo_owner", owner)
+    .eq("repo_name", name)
+    .maybeSingle();
+  if (project.error) throw new Error(`Could not read the repository: ${project.error.message}`);
+  if (!project.data) return null;
+
+  const found = await supabase.from("analyses").select("id").eq("project_id", project.data.id).eq("version", version).maybeSingle();
+  if (found.error) throw new Error(`Could not read the analysis: ${found.error.message}`);
+  if (found.data) {
+    const analysis = await getAnalysis(found.data.id);
+    if (analysis) return { kind: "found" as const, analysis };
+  }
+  return {
+    kind: version <= project.data.last_version ? ("removed" as const) : ("never" as const),
+    projectId: project.data.id,
+    owner: project.data.repo_owner,
+    name: project.data.repo_name,
+  };
+}
 
 export interface StoredGraph {
   files: RepoFile[];

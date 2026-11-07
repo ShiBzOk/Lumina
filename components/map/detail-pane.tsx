@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { MODEL_CATEGORIES, type Framework, type ModelRole } from "@/lib/map/frameworks";
-import { walk, DEFAULT_DEPTH, DEPTHS, type Adjacency, type WalkDirection } from "@/lib/map/graph";
+import { walk, DEPTHS, type Adjacency, type WalkDirection } from "@/lib/map/graph";
 import { sameSelection, type Selection } from "@/lib/map/highlight";
 import { INSIGHT_SENTENCES, type Insights } from "@/lib/map/insights";
 import { fileTypeOf, type MapNode, type RepoMap } from "@/lib/map/model";
@@ -12,7 +12,14 @@ import { TYPE_COLOR } from "./colors";
 import { Explanation, explainKey, type ExplainState, type Handed } from "./explanation";
 import { Icon, type IconName } from "./icons";
 
-export type PaneTab = "structure" | "explanation";
+import type { PaneTab } from "@/lib/map/view";
+
+export type { PaneTab };
+
+export interface WalkState {
+  direction: WalkDirection | null;
+  depth: number;
+}
 
 /** How many rows a summary list shows before it is asked for the rest. */
 const LIST_LIMIT = 8;
@@ -40,6 +47,9 @@ interface DetailPaneProps {
   onInsightsOpen: (open: boolean) => void;
   tab: PaneTab;
   onTab: (tab: PaneTab) => void;
+  /** Blast radius or dependency chain and its depth; kept as the selection moves, so one walk can be compared across files. */
+  walk: WalkState;
+  onWalk: (walk: WalkState) => void;
   onSelect: (selection: Selection) => void;
   onHover: (selection: Selection) => void;
   onCollapse: () => void;
@@ -83,7 +93,7 @@ export function DetailPane(props: DetailPaneProps) {
           />
         )}
         <span className="flex-1" />
-        <button type="button" onClick={onCollapse} title="Hide details" className="mb-2 rounded p-1 text-muted hover:bg-background">
+        <button type="button" onClick={onCollapse} data-tip="Hide details" aria-label="Hide details" className="mb-2 rounded p-1 text-muted hover:bg-background">
           <Icon name="chevronRight" className="size-3.5" />
         </button>
       </div>
@@ -549,6 +559,8 @@ function FileStructure({
   modelRoles,
   importsOf,
   graph,
+  walk: walkState,
+  onWalk,
   hovered,
   onSelect,
   onHover,
@@ -600,7 +612,7 @@ function FileStructure({
         <p className="mt-1 text-[10.5px] text-muted">On the map because a parsed import resolved to it.</p>
       )}
 
-      <Walk path={path} graph={graph} {...list} />
+      <Walk path={path} graph={graph} state={walkState} onChange={onWalk} {...list} />
 
       <SectionTitle icon="arrowUpRight" aside={<span className="font-mono text-[10px] text-outgoing">{dependsOn.length}</span>}>
         Depends on
@@ -666,17 +678,18 @@ const WALKS: { direction: WalkDirection; label: string; icon: IconName; color: s
 function Walk({
   path,
   graph,
+  state: { direction, depth },
+  onChange,
   ...list
 }: {
   path: string;
   graph: Adjacency;
+  state: WalkState;
+  onChange: (walk: WalkState) => void;
   hovered: Selection;
   onSelect: (s: Selection) => void;
   onHover: (s: Selection) => void;
 }) {
-  // Kept as the selection moves, so the same walk can be compared across files.
-  const [direction, setDirection] = useState<WalkDirection | null>(null);
-  const [depth, setDepth] = useState<number>(DEFAULT_DEPTH);
   const reached = useMemo(() => (direction ? walk(graph, path, direction, depth) : []), [graph, path, direction, depth]);
   const active = WALKS.find((w) => w.direction === direction);
   // Only the chosen level is shown. A file sits at the shortest distance it is
@@ -691,7 +704,8 @@ function Walk({
             key={w.direction}
             type="button"
             aria-pressed={direction === w.direction}
-            onClick={() => setDirection((d) => (d === w.direction ? null : w.direction))}
+            data-tip={w.note}
+            onClick={() => onChange({ direction: direction === w.direction ? null : w.direction, depth })}
             className={`flex items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium transition-[color,background-color,border-color,scale] duration-150 ${
               direction === w.direction ? "border-accent/40 bg-accent/8 text-accent" : "border-border hover:bg-background"
             }`}
@@ -721,7 +735,7 @@ function Walk({
                   key={d}
                   type="button"
                   aria-pressed={depth === d}
-                  onClick={() => setDepth(d)}
+                  onClick={() => onChange({ direction, depth: d })}
                   className={`relative w-6 rounded py-0.5 font-mono text-[10.5px] tabular-nums transition-[color,scale] duration-150 ${
                     depth === d ? "font-semibold text-accent" : "hover:text-foreground"
                   }`}

@@ -8,6 +8,7 @@ export function Menu({
   icon,
   label,
   defaultOpen = false,
+  tip,
   children,
 }: {
   icon: IconName;
@@ -15,6 +16,8 @@ export function Menu({
   label: ReactNode;
   /** Open when first shown, for a page arrived at specifically to use this menu. */
   defaultOpen?: boolean;
+  /** What the menu is for, shown on hover while it is shut. */
+  tip?: string;
   children: (close: () => void) => ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -35,16 +38,17 @@ export function Menu({
   }, [open]);
 
   return (
-    <div ref={root} className="relative">
+    <div ref={root} className="relative min-w-0">
       <button
         type="button"
         aria-expanded={open}
+        data-tip={tip}
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-[11px] hover:bg-background"
+        className="flex max-w-full min-w-0 items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-[11px] whitespace-nowrap hover:bg-background"
       >
-        <Icon name={icon} className="size-3.5 text-accent" />
+        <Icon name={icon} className="size-3.5 shrink-0 text-accent" />
         {label}
-        <Icon name="chevronDown" className="size-3 text-muted" />
+        <Icon name="chevronDown" className="size-3 shrink-0 text-muted" />
       </button>
       {open && (
         <div className="absolute top-full left-0 z-30 mt-1 w-80 overflow-hidden rounded-xl bg-surface shadow-[0_8px_24px_rgba(16,24,40,0.12)] ring-1 ring-border">

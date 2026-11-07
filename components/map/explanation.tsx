@@ -103,7 +103,7 @@ export function Explanation({ subject, handed, unexplainable, state, onExplain, 
               {/* Kept: it's how a working cache is told from a broken one. */}
               <Tag>{state.cached ? "From cache" : "Generated"}</Tag>
               <span className="flex-1" />
-              <button type="button" onClick={onExplain} className="flex items-center gap-1 font-sans hover:text-foreground" title="Ask the model again">
+              <button type="button" onClick={onExplain} className="flex items-center gap-1 font-sans hover:text-foreground" data-tip="Ask the model again, skipping the cache">
                 <Icon name="refresh" className="size-3" /> Again
               </button>
             </div>

@@ -59,10 +59,13 @@ export function FileSearch({ nodes, onPick }: { nodes: readonly MapNode[]; onPic
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex w-56 items-center gap-2 rounded-lg bg-background px-2.5 py-1.5 text-left text-xs text-muted ring-1 ring-border hover:text-foreground"
+        data-tip="Search folders and files · Ctrl+K"
+        aria-label="Search folders and files"
+        className="flex items-center gap-2 rounded-lg bg-background px-2.5 py-1.5 text-left text-xs text-muted ring-1 ring-border hover:text-foreground lg:w-56"
       >
         <Icon name="search" className="size-3.5 shrink-0" />
-        Search folders and files
+        {/* On a narrow screen the button is the icon alone; the dialog it opens is the same. */}
+        <span className="hidden truncate lg:inline">Search folders and files</span>
       </button>
       {open && (
         <SearchDialog
@@ -132,7 +135,7 @@ function SearchDialog({
             placeholder="Search folders and files…"
             className="min-w-0 flex-1 bg-transparent font-mono text-[13px] outline-none placeholder:text-muted"
           />
-          <button type="button" onClick={onClose} title="Close" className="rounded p-1 text-muted hover:bg-background hover:text-foreground">
+          <button type="button" onClick={onClose} data-tip="Close · Esc" aria-label="Close" className="rounded p-1 text-muted hover:bg-background hover:text-foreground">
             <Icon name="x" className="size-4" />
           </button>
         </div>

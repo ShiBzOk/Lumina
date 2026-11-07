@@ -7,6 +7,8 @@ import { Icon } from "./icons";
 
 export interface AnalysisOption {
   id: string;
+  /** Where it opens: its repository and version. */
+  path: string;
   /** Its number within the repository, which is what it is called. */
   version: number;
   /** Null only on a row from before commits were resolved up front that failed before reaching one. */
@@ -40,14 +42,20 @@ export function AnalysisSwitcher({
   return (
     <Menu
       icon="branch"
+      // The short commit is on the button itself; the tip adds what isn't, in words.
+      tip={`${current.branch ? `On ${current.branch}, mapped` : "Mapped"} ${current.ran}. Click for other versions.`}
       label={
-        <span className="flex items-center gap-2 font-mono">
-          <span className="font-sans font-medium" title={current.commit ?? undefined}>
-            {versionName(current.version)}
-          </span>
-          {current.branch && <span className="text-muted">{current.branch}</span>}
-          <span className="font-sans text-muted">{current.ran}</span>
-          {earlier && <span className="rounded bg-background px-1 font-sans text-[10px] ring-1 ring-border">earlier analysis</span>}
+        // Branch and time are in the menu and the tooltip; the header keeps what
+        // identifies the map. A link names one analysis, so the commit stays in view.
+        <span className="flex items-center gap-1.5 font-mono">
+          <span className="font-sans font-medium">{versionName(current.version)}</span>
+          {current.commit && <span className="text-muted">· {current.commit.slice(0, 7)}</span>}
+          {/* Shortened on narrow screens, never dropped: an old map must not read as the current one. */}
+          {earlier && (
+            <span className="rounded bg-background px-1 font-sans text-[10px] ring-1 ring-border">
+              earlier<span className="hidden xl:inline"> analysis</span>
+            </span>
+          )}
         </span>
       }
     >
@@ -58,7 +66,7 @@ export function AnalysisSwitcher({
           </MenuHeading>
           <div className="max-h-72 overflow-y-auto px-1 pb-1">
             {analyses.map((a) => (
-              <Link key={a.id} href={`/analyses/${a.id}`} onClick={close} className={`${MENU_ROW} text-[11px]`}>
+              <Link key={a.id} href={a.path} onClick={close} className={`${MENU_ROW} text-[11px]`}>
                 <span className="w-16 shrink-0 font-medium" title={a.commit ?? undefined}>
                   {versionName(a.version)}
                 </span>

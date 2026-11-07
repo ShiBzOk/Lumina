@@ -12,8 +12,8 @@ import { Icon } from "./icons";
 export type FileMark = "added" | "changed";
 
 const MARK: Record<FileMark, { glyph: string; title: string }> = {
-  added: { glyph: "+", title: "Added since base" },
-  changed: { glyph: "~", title: "Content changed since base" },
+  added: { glyph: "+", title: "Added since the compared analysis" },
+  changed: { glyph: "~", title: "Content changed since the compared analysis" },
 };
 
 interface NodeCardProps {
@@ -85,7 +85,7 @@ export const NodeCard = memo(function NodeCard({
           <p className="truncate text-[13px] leading-[18px] font-semibold">
             {node.label}
             {marked && (
-              <span className="ml-1.5 font-mono text-[11px] font-medium text-accent" title="Holds files added or changed since base">
+              <span className="ml-1.5 font-mono text-[11px] font-medium text-accent" data-tip="Holds files added or changed since the compared analysis">
                 ±
               </span>
             )}
@@ -97,7 +97,7 @@ export const NodeCard = memo(function NodeCard({
           {/* While filtering every card says how many matched, so the counts on screen add up to the rail's. */}
           {filtering ? `${matching}/${node.files.length}` : node.files.length} files
         </span>
-        <span className="shrink-0 cursor-grab text-muted/70 active:cursor-grabbing" title="Drag to move">
+        <span className="shrink-0 cursor-grab text-muted/70 active:cursor-grabbing" data-tip="Drag the header to move this card">
           <Icon name="move" className="size-3.5" />
         </span>
         <HeaderHandle side="right" lit={lit} />
@@ -186,7 +186,7 @@ function Row({
       <span className="size-1.5 shrink-0 rounded-full" style={{ background: TYPE_COLOR[file.type] }} aria-hidden />
       <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{file.label}</span>
       {mark && (
-        <span className="shrink-0 font-mono text-[11px] font-medium text-accent" title={MARK[mark].title}>
+        <span className="shrink-0 font-mono text-[11px] font-medium text-accent" data-tip={MARK[mark].title}>
           {MARK[mark].glyph}
         </span>
       )}

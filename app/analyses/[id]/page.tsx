@@ -1,89 +1,24 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { LoadingAnalysis } from "@/components/analysis/loading";
-import { AnalysisProgress } from "@/components/analysis/progress";
-import { MapWorkspace } from "@/components/map/map-workspace";
-import { WorkspaceHeader } from "@/components/workspace-header";
-import { getAnalysis, listProjectAnalyses, listRepositories, loadGraph } from "@/lib/analyses";
 import { PageTransition } from "@/components/page-transition";
-import type { AnalysisStatus } from "@/lib/stages";
+import { analysisPath } from "@/lib/analysis-path";
+import { getAnalysis } from "@/lib/analyses";
+import { AnalysisScreen, queryOf } from "../analysis-screen";
 
 export const metadata: Metadata = { title: "Analysis · Lumina" };
 
-// When an analysis was asked for, in the server's own time zone: this is a
-// local app, so that is the reader's. Formatted here so the browser never
-// renders it differently.
-const RAN = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-
-// One address for an analysis from start to finish: its progress while it
-// runs, its map once stored. A finished run refreshes this page into the map.
+// The address an analysis had before it had a readable one. Links already
+// sent still work: they land on the readable address with their view intact.
+// Only a repository whose owner shares a name with a page of the app stays here.
 async function Analysis({ params, searchParams }: PageProps<"/analyses/[id]">) {
   const { id } = await params;
-  // The repository switcher's list doesn't depend on this analysis, so it is read alongside it.
-  const [analysis, repositories] = await Promise.all([getAnalysis(id), listRepositories()]);
+  const [analysis, address] = await Promise.all([getAnalysis(id), searchParams]);
   if (!analysis || !analysis.project) notFound();
-  const repo = `${analysis.project.repo_owner}/${analysis.project.repo_name}`;
-
-  if (analysis.status === "complete") {
-    if (!analysis.commit_sha || !analysis.adapter) {
-      throw new Error(`Analysis ${analysis.id} is complete but has no commit or adapter recorded`);
-    }
-    const [{ files, edges, imports, routes, routesWithheld, coverage, labels }, history] = await Promise.all([
-      loadGraph(analysis),
-      listProjectAnalyses(analysis.project_id),
-    ]);
-    const option = (a: { id: string; version: number; commit_sha: string | null; branch: string | null; status: AnalysisStatus; created_at: string }) => ({
-      id: a.id,
-      version: a.version,
-      commit: a.commit_sha,
-      branch: a.branch,
-      status: a.status,
-      ran: RAN.format(new Date(a.created_at)),
-    });
-    // The list is capped; the one being looked at is always in it.
-    const { compare } = await searchParams;
-    const analyses = history.some((a) => a.id === analysis.id) ? history.map(option) : [...history, analysis].map(option);
-    // Only what the browser needs crosses over; everything the panes show is derived from these.
-    return (
-      <MapWorkspace
-        meta={{ analysisId: analysis.id, repo, branch: analysis.branch, commit: analysis.commit_sha }}
-        repositories={repositories.map((r) => ({ id: r.open, repo: r.repo, branch: r.branch, status: r.status }))}
-        analyses={analyses}
-        latest={history.find((a) => a.status === "complete")?.id ?? null}
-        adapter={analysis.adapter}
-        files={files}
-        edges={edges}
-        imports={imports}
-        routes={routes}
-        routesWithheld={routesWithheld}
-        coverage={coverage}
-        labels={labels}
-        compareBase={typeof compare === "string" ? compare : null}
-      />
-    );
-  }
-
-  return (
-    <div className="flex min-h-screen flex-col">
-      <WorkspaceHeader />
-      <main className="flex flex-1 flex-col">
-        <AnalysisProgress
-          id={analysis.id}
-          repo={repo}
-          branch={analysis.branch}
-          commit={analysis.commit_sha}
-          version={analysis.version}
-          initial={{
-            status: analysis.status,
-            stage: analysis.stage,
-            message: analysis.status === "failed" ? analysis.error : analysis.stage_message,
-          }}
-          stale={analysis.stale}
-        />
-      </main>
-    </div>
-  );
+  const path = analysisPath({ id: analysis.id, owner: analysis.project.repo_owner, name: analysis.project.repo_name, version: analysis.version });
+  if (path !== `/analyses/${analysis.id}`) redirect(path + queryOf(address));
+  return <AnalysisScreen analysis={{ ...analysis, project: analysis.project }} address={address} />;
 }
 
 export default function AnalysisPage({ params, searchParams }: PageProps<"/analyses/[id]">) {

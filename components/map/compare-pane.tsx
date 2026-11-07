@@ -47,10 +47,10 @@ export function ComparePane(props: ComparePaneProps) {
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
         <span className="text-xs font-medium">Compare</span>
         <span className="flex-1" />
-        <button type="button" onClick={onExit} title="Leave Compare" className="rounded p-1 text-muted hover:bg-background">
+        <button type="button" onClick={onExit} data-tip="Leave Compare" aria-label="Leave Compare" className="rounded p-1 text-muted hover:bg-background">
           <Icon name="x" className="size-3.5" />
         </button>
-        <button type="button" onClick={onCollapse} title="Hide details" className="rounded p-1 text-muted hover:bg-background">
+        <button type="button" onClick={onCollapse} data-tip="Hide details" aria-label="Hide details" className="rounded p-1 text-muted hover:bg-background">
           <Icon name="chevronRight" className="size-3.5" />
         </button>
       </div>

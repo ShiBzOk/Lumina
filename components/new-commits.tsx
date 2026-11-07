@@ -46,7 +46,7 @@ export function RemapButton({ analysisId, className }: { analysisId: string; cla
           {state.error}
         </span>
       )}
-      <button type="submit" disabled={pending} className={`flex shrink-0 items-center gap-1 disabled:opacity-60 ${className}`}>
+      <button type="submit" disabled={pending} data-tip="Map the branch's latest commit as a new version; this one is kept" className={`flex shrink-0 items-center gap-1 disabled:opacity-60 ${className}`}>
         <Icon name="refresh" className="size-3" />
         {pending ? "Starting…" : "Re-map"}
       </button>

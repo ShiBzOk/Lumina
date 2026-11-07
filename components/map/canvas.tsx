@@ -73,14 +73,32 @@ interface CanvasProps {
   onHover: (target: Selection) => void;
   /** Floats at the top centre of the canvas. */
   banner: ReactNode;
+  /** Where the cards start: compact or not, and how far each card's list is scrolled. Read once. */
+  initial: { compact: boolean; offsets: ReadonlyMap<string, number> };
+  /** Hears every change to either, so the address can carry them. */
+  onView: (compact: boolean, offsets: ReadonlyMap<string, number>) => void;
   /** Extra floating controls, positioned by the caller. */
   children?: ReactNode;
   ref?: Ref<CanvasHandle>;
 }
 
-export function Canvas({ map, selection, highlight, hovered, filter, marks, onSelect, onHover, banner, children, ref }: CanvasProps) {
+export function Canvas({
+  map,
+  selection,
+  highlight,
+  hovered,
+  filter,
+  marks,
+  onSelect,
+  onHover,
+  banner,
+  initial,
+  onView,
+  children,
+  ref,
+}: CanvasProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const [compact, setCompact] = useState(false);
+  const [compact, setCompact] = useState(initial.compact);
   // Each starts as its layout itself, so "moved" is just "no longer the same map".
   // Kept apart, so arranging one view leaves the other as it was.
   const [fullPositions, setFullPositions] = useState<ReadonlyMap<string, Point>>(map.positions);
@@ -91,7 +109,8 @@ export function Canvas({ map, selection, highlight, hovered, filter, marks, onSe
   const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, k: 1 });
   const [size, setSize] = useState({ w: 0, h: 0 });
   // First file shown in each card that holds more than MAX_VISIBLE_ROWS.
-  const [offsets, setOffsets] = useState<ReadonlyMap<string, number>>(new Map());
+  const [offsets, setOffsets] = useState<ReadonlyMap<string, number>>(initial.offsets);
+  useEffect(() => onView(compact, offsets), [compact, offsets, onView]);
   const [minimap, setMinimap] = useState(true);
   const [onlyLit, setOnlyLit] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -570,7 +589,8 @@ export function Canvas({ map, selection, highlight, hovered, filter, marks, onSe
         <ToolButton icon="zoomOut" label="Zoom out" onClick={() => zoomBy(1 / 1.2)} />
         <button
           type="button"
-          title="Fit to screen"
+          data-tip="Zoom level. Click to fit the whole map on screen"
+          aria-label="Fit to screen"
           onClick={() => glideTo(fit(bounds, size.w, size.h))}
           className="w-12 rounded-md py-1.5 transition-[scale] duration-100 active:scale-95 text-center font-mono text-[11px] text-muted tabular-nums hover:bg-background"
         >
@@ -605,7 +625,7 @@ function ToolButton({
   return (
     <button
       type="button"
-      title={label}
+      data-tip={label}
       aria-label={label}
       aria-pressed={active}
       disabled={disabled}

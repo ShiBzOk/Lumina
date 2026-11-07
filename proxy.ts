@@ -38,5 +38,8 @@ export const config = {
   matcher: [
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",
+    // A map's address is its repository's name, and names like next.js or
+    // three.js look like static files to the pattern above, which would skip sign-in.
+    "/:owner/:repo/:version(v\\d+)",
   ],
 };
