@@ -213,6 +213,7 @@ export type Database = {
       }
       file_roles: {
         Row: {
+          analysis_id: string
           file_id: string
           id: string
           org_id: string
@@ -220,6 +221,7 @@ export type Database = {
           source: string
         }
         Insert: {
+          analysis_id: string
           file_id: string
           id?: string
           org_id: string
@@ -227,6 +229,7 @@ export type Database = {
           source: string
         }
         Update: {
+          analysis_id?: string
           file_id?: string
           id?: string
           org_id?: string
@@ -234,6 +237,13 @@ export type Database = {
           source?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "file_roles_analysis_id_org_id_fkey"
+            columns: ["analysis_id", "org_id"]
+            isOneToOne: false
+            referencedRelation: "analyses"
+            referencedColumns: ["id", "org_id"]
+          },
           {
             foreignKeyName: "file_roles_file_id_org_id_fkey"
             columns: ["file_id", "org_id"]
@@ -512,6 +522,92 @@ export type Database = {
           },
         ]
       }
+      notifications: {
+        Row: {
+          actor_name: string | null
+          analysis_id: string | null
+          branch: string | null
+          created_at: string
+          id: string
+          kind: Database["public"]["Enums"]["notification_kind"]
+          note_id: string | null
+          org_id: string
+          path: string | null
+          project_id: string
+          read_at: string | null
+          reason: string | null
+          recipient_id: string
+          repo_name: string
+          repo_owner: string
+          version: number | null
+        }
+        Insert: {
+          actor_name?: string | null
+          analysis_id?: string | null
+          branch?: string | null
+          created_at?: string
+          id?: string
+          kind: Database["public"]["Enums"]["notification_kind"]
+          note_id?: string | null
+          org_id: string
+          path?: string | null
+          project_id: string
+          read_at?: string | null
+          reason?: string | null
+          recipient_id: string
+          repo_name: string
+          repo_owner: string
+          version?: number | null
+        }
+        Update: {
+          actor_name?: string | null
+          analysis_id?: string | null
+          branch?: string | null
+          created_at?: string
+          id?: string
+          kind?: Database["public"]["Enums"]["notification_kind"]
+          note_id?: string | null
+          org_id?: string
+          path?: string | null
+          project_id?: string
+          read_at?: string | null
+          reason?: string | null
+          recipient_id?: string
+          repo_name?: string
+          repo_owner?: string
+          version?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_analysis_id_fkey"
+            columns: ["analysis_id"]
+            isOneToOne: false
+            referencedRelation: "analyses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_project_id_org_id_fkey"
+            columns: ["project_id", "org_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id", "org_id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           created_at: string
@@ -699,6 +795,7 @@ export type Database = {
     Enums: {
       analysis_stage: "fetching" | "selecting" | "parsing" | "storing" | "labelling"
       analysis_status: "queued" | "running" | "complete" | "failed"
+      notification_kind: "note" | "run_complete" | "run_failed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -828,6 +925,7 @@ export const Constants = {
     Enums: {
       analysis_stage: ["fetching", "selecting", "parsing", "storing", "labelling"],
       analysis_status: ["queued", "running", "complete", "failed"],
+      notification_kind: ["note", "run_complete", "run_failed"],
     },
   },
 } as const

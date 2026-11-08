@@ -50,15 +50,7 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
     if (error) throw new Error(`Could not update the analysis: ${error.message}`);
     if (data.length === 0) throw new Superseded();
   };
-  // One line per stage in the server log, so a slow run says where its time went.
-  let stageStarted = performance.now();
-  const timed = (finished: string) => {
-    const now = performance.now();
-    console.log(`Analysis ${analysisId} (${slug}): ${finished} took ${((now - stageStarted) / 1000).toFixed(1)}s`);
-    stageStarted = now;
-  };
   const enter = (next: AnalysisStage, message: string) => {
-    if (next !== stage) timed(stage);
     stage = next;
     return update({ status: "running", stage: next, stage_message: message });
   };
@@ -143,14 +135,13 @@ export async function runAnalysis(request: RunRequest): Promise<void> {
     const rows = [...labels].map(([path, role]) => {
       const fileId = idOf.get(path);
       if (!fileId) throw new Error(`A label names ${path}, which was not stored`);
-      return { org_id: orgId, file_id: fileId, role, source: "model" };
+      return { org_id: orgId, analysis_id: analysisId, file_id: fileId, role, source: "model" };
     });
     for (let i = 0; i < rows.length; i += 1000) {
       const { error } = await db.from("file_roles").insert(rows.slice(i, i + 1000));
       if (error) throw new Error(`Could not store labels: ${error.message}`);
     }
 
-    timed(stage);
     await update({
       status: "complete",
       stage: null,
@@ -231,7 +222,6 @@ async function prune(db: ReturnType<typeof createWriterSupabase>, request: RunRe
   if (doomed.length === 0) return;
   const removed = await db.from("analyses").delete().in("id", doomed.map((a) => a.id));
   if (removed.error) fail(`remove ${doomed.length} older analyses`, removed.error.message);
-  else console.log(`Analysis ${request.analysisId}: removed ${doomed.length} analyses past the ${KEPT_ANALYSES} kept`);
 }
 
 function size(bytes: number): string {

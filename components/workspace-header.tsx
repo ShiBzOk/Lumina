@@ -1,4 +1,5 @@
 import { AccountButton } from "@/components/account-button";
+import { InboxSlot } from "@/components/inbox/inbox-slot";
 import { Logo } from "@/components/logo";
 import { OrganizationSwitcher } from "@/components/organization-switcher";
 
@@ -10,6 +11,7 @@ export function WorkspaceHeader() {
       <span className="h-5 w-px bg-border" aria-hidden />
       <OrganizationSwitcher />
       <div className="flex-1" />
+      <InboxSlot />
       <AccountButton />
     </header>
   );

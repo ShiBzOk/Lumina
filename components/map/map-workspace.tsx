@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { AccountButton } from "@/components/account-button";
 import { Logo } from "@/components/logo";
@@ -58,6 +58,8 @@ interface MapWorkspaceProps {
   me: string;
   /** The page's search params: the view to open on. Read once; after that the view writes the address. */
   address: Address;
+  /** The inbox beside the account, rendered on the server with its count. */
+  inbox: ReactNode;
 }
 
 /** A compared base as it arrives: asked for once, then kept for the visit. */
@@ -82,6 +84,7 @@ export function MapWorkspace({
   notes: initialNotes,
   me,
   address,
+  inbox,
 }: MapWorkspaceProps) {
   // Opening a map is a visit to its repository: one write, when it opens, and
   // none for anything done on it after. The page keys this component by
@@ -336,6 +339,7 @@ export function MapWorkspace({
         <div className="flex flex-1 shrink-0 items-center justify-end gap-2">
           <FileSearch nodes={map.nodes} noted={noted} onPick={selectAndReveal} />
           <CopyLink path={here} view={view} />
+          {inbox}
           <AccountButton />
         </div>
       </header>

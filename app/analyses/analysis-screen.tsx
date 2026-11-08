@@ -1,5 +1,6 @@
 import { AnalysisProgress } from "@/components/analysis/progress";
 import { MapWorkspace } from "@/components/map/map-workspace";
+import { InboxSlot } from "@/components/inbox/inbox-slot";
 import { WorkspaceHeader } from "@/components/workspace-header";
 import { analysisPath } from "@/lib/analysis-path";
 import { listProjectAnalyses, listRepositories, loadGraph, repositoryMap, type Analysis } from "@/lib/analyses";
@@ -69,6 +70,7 @@ export async function AnalysisScreen({ analysis, address }: { analysis: Analysis
         notes={notes}
         me={userId}
         address={address}
+        inbox={<InboxSlot />}
       />
     );
   }

@@ -8,8 +8,6 @@
     "start": "next start",
     "lint": "eslint",
     "parse": "node parser/cli.ts",
-    "check:map": "node scripts/check-map.ts",
-    "check:insights": "node scripts/check-insights.ts",
     "landing:map": "node scripts/landing-map.ts",
     "eval:paths": "node --import ./evals/setup.ts evals/invented-paths.ts",
     "eval:roles": "node --import ./evals/setup.ts evals/roles.ts",

@@ -247,19 +247,9 @@ export interface StoredStructure {
   labels: StoredGraph["labels"];
 }
 
-// A whole table of one analysis, with how long it took in the server log:
-// opening a large map was slow, and this says which table it was waiting on.
-async function readTable<T>(what: string, page: (from: number, to: number, count: boolean) => Page<T>): Promise<T[]> {
-  const started = performance.now();
-  const rows = await readAll(what, page);
-  const seconds = ((performance.now() - started) / 1000).toFixed(1);
-  console.log(`  ${what}: ${rows.length} rows in ${Math.max(1, Math.ceil(rows.length / PAGE))} pages, ${seconds}s`);
-  return rows;
-}
-
 async function readStructure(supabase: Reader, id: string) {
   const [fileRows, roleRows, edgeRows] = await Promise.all([
-    readTable("files", (from, to, c) =>
+    readAll("files", (from, to, c) =>
       supabase
         .from("files")
         .select("id, path, folder, package, kind, line_count, bytes, content_hash, fan_in, fan_out", { count: count(c) })
@@ -267,16 +257,15 @@ async function readStructure(supabase: Reader, id: string) {
         .order("id")
         .range(from, to),
     ),
-    // Roles have no analysis column; they arrive through their file.
-    readTable("file roles", (from, to, c) =>
+    readAll("file roles", (from, to, c) =>
       supabase
         .from("file_roles")
-        .select("file_id, role, source, file:files!inner(analysis_id)", { count: count(c) })
-        .eq("file.analysis_id", id)
+        .select("file_id, role, source", { count: count(c) })
+        .eq("analysis_id", id)
         .order("id")
         .range(from, to),
     ),
-    readTable("edges", (from, to, c) =>
+    readAll("edges", (from, to, c) =>
       supabase
         .from("edges")
         .select("source_file_id, target_file_id, kinds, type_only", { count: count(c) })
@@ -332,13 +321,12 @@ async function readStructure(supabase: Reader, id: string) {
 
 /** The stored rows of a finished analysis, rebuilt into exactly what the parser returned. */
 export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
-  const started = performance.now();
   const supabase = await reader();
   const id = analysis.id;
 
   const [{ structure, path }, importRows, routeRows] = await Promise.all([
     readStructure(supabase, id),
-    readTable("imports", (from, to, c) =>
+    readAll("imports", (from, to, c) =>
       supabase
         .from("imports")
         .select("file_id, specifier, kind, type_only, line, status, reason, target, detail", { count: count(c) })
@@ -346,7 +334,7 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
         .order("id")
         .range(from, to),
     ),
-    readTable("routes", (from, to, c) =>
+    readAll("routes", (from, to, c) =>
       supabase
         .from("routes")
         .select("file_id, method, pattern, line", { count: count(c) })
@@ -370,8 +358,6 @@ export async function loadGraph(analysis: Analysis): Promise<StoredGraph> {
     .map((r) => ({ file: path(r.file_id, "routes.file_id"), line: r.line, method: r.method, pattern: r.pattern }))
     .sort((a, b) => compare(a.pattern, b.pattern) || compare(a.method, b.method) || compare(a.file, b.file));
 
-  const seconds = ((performance.now() - started) / 1000).toFixed(1);
-  console.log(`Loaded analysis ${id}: ${structure.files.length} files, ${structure.edges.length} edges, ${imports.length} imports in ${seconds}s`);
   return {
     ...structure,
     imports,

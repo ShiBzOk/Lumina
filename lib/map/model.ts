@@ -104,7 +104,7 @@ export function buildMap(files: readonly RepoFile[], edges: readonly Edge[], mod
   }));
 
   // Only edges whose two ends are both on the map; the parser guarantees that
-  // is all of them, and the check script counts it rather than trusting it.
+  // is all of them.
   const mapEdges: MapEdge[] = edges.flatMap((e) => {
     const fromNode = folded.nodeOf.get(e.from);
     const toNode = folded.nodeOf.get(e.to);

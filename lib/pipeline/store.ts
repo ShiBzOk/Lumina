@@ -78,7 +78,7 @@ export async function storeResult(
     ...chunks(roles, async (chunk) => {
       const { error } = await db
         .from("file_roles")
-        .insert(chunk.map((f) => ({ org_id: orgId, file_id: id(f.path), role: f.role, source: "adapter" })));
+        .insert(chunk.map((f) => ({ ...base, file_id: id(f.path), role: f.role, source: "adapter" })));
       if (error) throw new Error(`Could not store file roles: ${error.message}`);
       await stored(chunk.length);
     }),
