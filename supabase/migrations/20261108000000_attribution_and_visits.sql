@@ -1,4 +1,4 @@
--- Phase 15: who mapped it, and what's new since you last looked.
+-- Who mapped it, and what's new since you last looked.
 
 -- ─── Who started an analysis ───────────────────────────────────────────────
 -- The Clerk user id and the display name on their session token, both copied

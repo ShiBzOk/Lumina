@@ -3,7 +3,7 @@
 // shaping the product.
 //
 // Reconstructed, not recovered: git only ever held the current prompt. This is
-// the approach Phase 10 rejected, written out: the same task, but formatting
+// the approach that was rejected, written out: the same task, but formatting
 // forbidden outright, and no instruction to write paths in full or to name
 // only paths it was given. The current prompt replaced exactly those lines, so
 // the comparison measures what that change bought.

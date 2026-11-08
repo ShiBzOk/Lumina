@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Lumina
 
-## Getting Started
+Paste a public TypeScript or JavaScript GitHub repository and get a map of how its code connects: folders as cards, imports as lines. Select a file to see what it depends on and what depends on it.
 
-First, run the development server:
+Everything on the map comes from parsing the code. An edge exists only because the parser resolved a real import to a real file. Anything it can't resolve is reported with a reason, never guessed. The AI writes explanations of what the parser found, and has no say in what's there.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## What's in it
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- **Parser** (`parser/`): built on ts-morph, and runs from a plain script with no framework or database code. Try it with `pnpm parse <path-to-a-repo>`.
+- **Framework adapters** (`adapters/`): Next.js, React, Express and NestJS knowledge lives here, so the parser stays framework-free.
+- **Map** (`components/map/`, `lib/map/`): React Flow and dagre.
+- **Data** (`supabase/migrations/`): Postgres, with access decided by row-level security policies rather than application code.
+- **AI** : one wrapped OpenAI client, traced with LangSmith. Each call reads the cache inside its trace.
+- **Evals** (`evals/`): check things like whether explanations mention file paths that don't exist.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## How this was built
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+I built this with AI coding tools. The starting structure, the planning documents and the first build stages came from a tutorial.
 
-## Learn More
+After that I carried on by myself, adding:
 
-To learn more about Next.js, take a look at the following resources:
+- comparing two analyses of a repository
+- shareable links to an exact view
+- who mapped a repository, and what's new since your last visit
+- notes pinned to files
+- branches inside one repository
+- in-app notifications
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Running it
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+You need Node, pnpm, and accounts with Clerk, Supabase and OpenAI. LangSmith is optional.
 
-## Deploy on Vercel
+1. Run `pnpm install`.
+2. Copy `.env.example` to `.env.local` and fill it in.
+3. Set up Clerk as a third-party auth provider in your Supabase project, with organizations turned on in Clerk.
+4. Apply the files in `supabase/migrations/` to your database, in order.
+5. Run `pnpm dev`.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Stack: Next.js 16, React 19, strict TypeScript, Tailwind v4.

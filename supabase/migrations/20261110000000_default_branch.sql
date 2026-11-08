@@ -1,4 +1,4 @@
--- Phase 17: branches inside one repository.
+-- Branches inside one repository.
 
 -- ─── The default branch ────────────────────────────────────────────────────
 -- Copied from GitHub whenever a run fetches the repository, beside the

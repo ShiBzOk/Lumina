@@ -1,11 +1,11 @@
--- Phase 10: the model explains and labels.
+-- The model explains and labels.
 --
 -- Both caches are keyed on what the model was asked, never on a file row. A
 -- re-analysis deletes and re-inserts every file, so a cache hanging off file
 -- ids would empty itself on every run and nobody would ever feel it.
 
 -- ─── Explanations ──────────────────────────────────────────────────────────
--- The phase 1 table hung off a file id and never had a writer; nothing is lost.
+-- The original table hung off a file id and never had a writer; nothing is lost.
 drop table public.explanations;
 
 create table public.explanations (

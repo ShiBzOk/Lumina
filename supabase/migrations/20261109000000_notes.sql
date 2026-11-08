@@ -1,4 +1,4 @@
--- Phase 16: plain notes left on a file for the next person who opens the map.
+-- Plain notes left on a file for the next person who opens the map.
 
 -- ─── The name claim ────────────────────────────────────────────────────────
 -- The person's display name, as it is on their session token. A note's author

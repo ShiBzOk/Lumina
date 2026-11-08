@@ -1,4 +1,4 @@
--- Phase 16 addendum: a note records the file it was written against.
+-- A note records the file it was written against.
 
 -- The analysis version on screen and the file's content hash in it, copied
 -- when the note is written or edited. Notes from before this have neither and

@@ -1,4 +1,4 @@
--- Phase 19: notifications, in the app only, about two things.
+-- Notifications, in the app only, about two things.
 
 -- ─── Notifications ─────────────────────────────────────────────────────────
 -- One row per person per event. Nothing in the app inserts one: the triggers

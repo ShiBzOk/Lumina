@@ -1,4 +1,4 @@
--- Phase 8: framework adapters extract routes.
+-- Framework adapters extract routes.
 --
 -- A route carries the line its method is written on, so each one can be
 -- checked by hand against the code it came from. No route has been written

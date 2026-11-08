@@ -1,4 +1,4 @@
--- Phase 12: a repository keeps its analyses.
+-- A repository keeps its analyses.
 --
 -- Re-analysing adds a row beside the old ones instead of re-running the one
 -- row a repository had. What may not repeat is the commit: the submit action

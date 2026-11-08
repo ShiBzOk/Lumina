@@ -1,4 +1,4 @@
--- Phase 9: require() becomes an import kind.
+-- Require() becomes an import kind.
 --
 -- The parser now resolves require() calls the same way it resolves imports, so
 -- "require" joins the vocabulary an edge or an import may carry.

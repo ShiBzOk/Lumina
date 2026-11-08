@@ -1,4 +1,4 @@
--- Phase 7 fix: one writer per analysis.
+-- One writer per analysis.
 --
 -- A run that stopped reporting is presumed dead and may be re-run, but nothing
 -- can stop the old process if it is in fact still going. So each run is an
