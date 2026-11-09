@@ -8,6 +8,8 @@ interface DrawerProps {
   side: "left" | "right";
   /** The panel's width when open, as CSS. */
   width: string;
+  /** Which stop on the first-run tour this panel is. */
+  tour: string;
   children: ReactNode;
 }
 
@@ -15,12 +17,13 @@ interface DrawerProps {
 // vanishing. It narrows instead of moving over the canvas, so the canvas
 // resizes with it and the map stays framed the whole way. The panel stays
 // mounted until it is out of sight, then unmounts so it costs nothing shut.
-export function Drawer({ open, side, width, children }: DrawerProps) {
+export function Drawer({ open, side, width, tour, children }: DrawerProps) {
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
 
   return (
     <div
+      data-tour={tour}
       inert={!open}
       onTransitionEnd={(e) => {
         if (e.target === e.currentTarget && !open) setMounted(false);

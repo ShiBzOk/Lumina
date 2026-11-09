@@ -508,6 +508,7 @@ export function Canvas({
   return (
     <div
       ref={rootRef}
+      data-tour="map"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

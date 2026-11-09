@@ -70,6 +70,7 @@ export function FileSearch({
     <>
       <button
         type="button"
+        data-tour="search"
         onClick={() => setOpen(true)}
         data-tip="Search folders and files · Ctrl+K"
         aria-label="Search folders and files"

@@ -28,11 +28,13 @@ import { Icon } from "./icons";
 import { FileSearch } from "./file-search";
 import { RepoSwitcher, type RepositoryOption } from "./repo-switcher";
 import { AnalysisSwitcher, type AnalysisOption } from "./analysis-switcher";
+import { CompareHint } from "./compare-hint";
 import { ComparePane, type CompareState } from "./compare-pane";
 import type { FileMark } from "./node-card";
 import { CopyLink } from "./copy-link";
 import { MissingFromLink } from "./missing-from-link";
 import type { NoteActions } from "./notes";
+import { Tour } from "./tour";
 
 interface MapWorkspaceProps {
   meta: { analysisId: string; projectId: string; repo: string; branch: string | null; commit: string; attribution: Attribution };
@@ -112,6 +114,9 @@ export function MapWorkspace({
       comparable: new Set(canCompare ? finished.map((a) => a.id) : []),
     }),
   );
+  // Someone arriving at a named file came for that file. Read once, because the
+  // address changes with every click after this.
+  const [plainOpen] = useState(() => Object.keys(address).length === 0);
   const [missing, setMissing] = useState(restored.missing);
   const [selection, setSelection] = useState<Selection>(restored.view.selection);
   // What the pointer is over, on the map or in the pane; each lights it in the other.
@@ -323,7 +328,7 @@ export function MapWorkspace({
         <div className="flex min-w-0 items-center gap-1">
           <RepoSwitcher repo={meta.repo} repositories={repositories} />
           <Icon name="chevronRight" className="size-3 shrink-0 text-muted" />
-          <div className="shrink-0">
+          <div className="shrink-0" data-tour="versions">
             <AnalysisSwitcher
               current={current}
               latest={latest}
@@ -349,7 +354,7 @@ export function MapWorkspace({
       <CoverageBanner coverage={coverage} />
 
       <div className="flex min-h-0 flex-1">
-        <Drawer open={railOpen} side="left" width="15rem">
+        <Drawer open={railOpen} side="left" width="15rem" tour="categories">
           <CategoryRail
             total={files.length}
             framework={framework}
@@ -415,7 +420,7 @@ export function MapWorkspace({
           )}
         </Canvas>
 
-        <Drawer open={paneOpen} side="right" width="19rem">
+        <Drawer open={paneOpen} side="right" width="19rem" tour="details">
           {base !== null ? (
             <ComparePane
               analyses={finished}
@@ -465,6 +470,9 @@ export function MapWorkspace({
           )}
         </Drawer>
       </div>
+
+      {plainOpen && files.length > 0 && <Tour user={me} selection={selection} hovered={hovered} />}
+      {plainOpen && canCompare && <CompareHint user={me} />}
     </div>
   );
 }

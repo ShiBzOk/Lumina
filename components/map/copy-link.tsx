@@ -39,6 +39,7 @@ export function CopyLink({ path, view }: { path: string; view: View }) {
     <div className="relative">
       <button
         type="button"
+        data-tour="share"
         onClick={copy}
         data-tip={shown && !("error" in shown) ? "Link copied" : "Copy a link to this exact view: selection, open walk, cards and Compare"}
         aria-label="Share: copy a link to this view"
