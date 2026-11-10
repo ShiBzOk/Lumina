@@ -4,6 +4,12 @@ Paste a public TypeScript or JavaScript GitHub repository and get a map of how i
 
 Everything on the map comes from parsing the code. An edge exists only because the parser resolved a real import to a real file. Anything it can't resolve is reported with a reason, never guessed. The AI writes explanations of what the parser found, and has no say in what's there.
 
+![The map of vercel/commerce, with the navbar folder selected and its imports traced](.github/screenshots/map.png)
+
+| Notes pinned to files | Versions and Compare |
+| --- | --- |
+| ![A note pinned to lib/shopify/index.ts](.github/screenshots/notes.png) | ![The version history menu next to the Compare panel](.github/screenshots/versions.png) |
+
 ## What's in it
 
 - **Parser** (`parser/`): built on ts-morph, and runs from a plain script with no framework or database code. Try it with `pnpm parse <path-to-a-repo>`.
