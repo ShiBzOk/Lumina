@@ -6,9 +6,9 @@ Everything on the map comes from parsing the code. An edge exists only because t
 
 ![The map of vercel/commerce, with the navbar folder selected and its imports traced](.github/screenshots/map.png)
 
-| Notes pinned to files | Versions and Compare |
-| --- | --- |
-| ![A note pinned to lib/shopify/index.ts](.github/screenshots/notes.png) | ![The version history menu next to the Compare panel](.github/screenshots/versions.png) |
+![A note pinned to lib/shopify/index.ts](.github/screenshots/notes.png)
+
+![The version history menu next to the Compare panel](.github/screenshots/versions.png)
 
 ## What's in it
 
